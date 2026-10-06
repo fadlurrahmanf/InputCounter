@@ -1,0 +1,16 @@
+# Build outputs: each local revision is intentionally kept outside source control.
+*.exe
+*.pdb
+*.obj
+*.log
+
+# User-local counter, high-score, Aura, and planet history data.
+AppData/
+bin/
+obj/
+
+# Editor and operating-system files.
+.vs/
+*.user
+Thumbs.db
+Desktop.ini

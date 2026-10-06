@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560">
+  <rect width="1180" height="560" fill="#101217"/>
+  <text x="48" y="54" fill="#f3f6ff" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="600">Compact HUD — number scale examples</text>
+  <text x="48" y="84" fill="#8da9d9" font-family="Segoe UI, Arial, sans-serif" font-size="15">Same narrow card. Number font gently reduces only when needed.</text>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(48 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Thousands</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="34" font-weight="600">3.949</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 4.088</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 20.851 key</text>
+    </g>
+    <g transform="translate(210 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Tens of thousands</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="32" font-weight="600">39.490</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 40.088</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 208.510 key</text>
+    </g>
+    <g transform="translate(372 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Hundreds of thousands</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="29" font-weight="600">394.900</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 408.800</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 2.085M key</text>
+    </g>
+    <g transform="translate(534 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Millions</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="27" font-weight="600">3.949.000</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 4.088.000</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 20.851M key</text>
+    </g>
+    <g transform="translate(696 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Tens of millions</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="25" font-weight="600">39.490.000</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 40.088.000</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 208.51M key</text>
+    </g>
+    <g transform="translate(858 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Hundreds of millions</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="22" font-weight="600">394.900.000</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 408.800.000</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 2.08B key</text>
+    </g>
+    <g transform="translate(1020 122)">
+      <text x="77" y="-13" text-anchor="middle" fill="#aeb6c7" font-size="14">Billions</text>
+      <rect width="154" height="214" rx="3" fill="#1c1f27" stroke="#303646"/>
+      <text x="77" y="49" text-anchor="middle" fill="#f3f6ff" font-size="19" font-weight="600">3.949.000.000</text>
+      <text x="77" y="78" text-anchor="middle" fill="#c8d1df" font-size="13">High: 4.088.000.000</text>
+      <text x="77" y="104" text-anchor="middle" fill="#e8effb" font-size="16">3 key/sec</text>
+      <text x="77" y="139" text-anchor="middle" fill="#9fc1ff" font-size="14" font-weight="600">Highscore: 5 key/sec</text>
+      <text x="77" y="170" text-anchor="middle" fill="#dbe2ee" font-size="14">All time: 20.85B key</text>
+    </g>
+  </g>
+  <text x="48" y="406" fill="#c8d1df" font-family="Segoe UI, Arial, sans-serif" font-size="17">Proposed rule</text>
+  <text x="48" y="438" fill="#8da9d9" font-family="Segoe UI, Arial, sans-serif" font-size="15">The Total number stays exact with Indonesian dot grouping. It scales smoothly from 34 px to 19 px, without abbreviating the main number.</text>
+  <text x="48" y="468" fill="#8da9d9" font-family="Segoe UI, Arial, sans-serif" font-size="15">Supporting values may use M/B abbreviations only if their row becomes too narrow; the main Total remains the focus.</text>
+</svg>
