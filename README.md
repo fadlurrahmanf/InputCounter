@@ -20,4 +20,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `InputCounter-core-top-center.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `InputCounter-aurora-core.exe`. The executable and all local score data are intentionally ignored by Git.

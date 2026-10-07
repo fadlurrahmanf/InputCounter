@@ -1281,6 +1281,7 @@ public sealed class InputCounterForm : Form
             int alpha = (int)((8 + auraSpeed * 16) / glow);
             using (SolidBrush brush = new SolidBrush(Color.FromArgb(alpha, coreTint))) graphics.FillEllipse(brush, core.X - glowRadius, core.Y - glowRadius, glowRadius * 2F, glowRadius * 2F);
         }
+        DrawAuroraHalo(graphics, core, radius);
         using (SolidBrush coreBrush = new SolidBrush(Color.FromArgb(235, coreTint))) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
         using (SolidBrush highlight = new SolidBrush(Color.FromArgb(225, Color.White))) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
@@ -1289,6 +1290,33 @@ public sealed class InputCounterForm : Form
         DrawSpeedWind(graphics, core, radius);
         DrawOwnedPlanets(graphics, core);
         graphics.SmoothingMode = oldSmoothing;
+    }
+    private void DrawAuroraHalo(Graphics graphics, PointF core, float coreRadius)
+    {
+        // A lightweight segmented ring gives the previously dark-looking area
+        // a continuously shifting aurora, without reintroducing a black orbit.
+        Color[] palette =
+        {
+            Color.FromArgb(70, 222, 255), Color.FromArgb(82, 112, 255),
+            Color.FromArgb(184, 96, 255), Color.FromArgb(82, 242, 198),
+            Color.FromArgb(120, 220, 255)
+        };
+        const int segmentCount = 20;
+        for (int layer = 0; layer < 3; layer++)
+        {
+            float haloRadius = coreRadius + 5F + layer * 2.6F;
+            RectangleF bounds = new RectangleF(core.X - haloRadius, core.Y - haloRadius, haloRadius * 2F, haloRadius * 2F);
+            for (int i = 0; i < segmentCount; i++)
+            {
+                double colourPosition = auraPhase * 1.35 + i * 0.36 + layer * 0.22;
+                int baseIndex = ((int)Math.Floor(colourPosition) % palette.Length + palette.Length) % palette.Length;
+                double blend = colourPosition - Math.Floor(colourPosition);
+                Color baseColour = Blend(palette[baseIndex], palette[(baseIndex + 1) % palette.Length], blend);
+                int alpha = 74 + (int)(26 * (0.5 + 0.5 * Math.Sin(auraPhase * 2.0 + i)));
+                using (Pen aurora = new Pen(Color.FromArgb(alpha, baseColour), 1.1F + layer * 0.20F))
+                    graphics.DrawArc(aurora, bounds, i * 360F / segmentCount - 2F, 360F / segmentCount + 3F);
+            }
+        }
     }
     private void DrawSpeedWind(Graphics graphics, PointF core, float coreRadius)
     {

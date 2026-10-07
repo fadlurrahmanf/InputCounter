@@ -1,10 +1,10 @@
 #requires -Version 5.1
 
-$app = Join-Path $PSScriptRoot 'InputCounter-core-top-center.exe'
+$app = Join-Path $PSScriptRoot 'InputCounter-aurora-core.exe'
 if (-not (Test-Path -LiteralPath $app)) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
-        'InputCounter-core-top-center.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
+        'InputCounter-aurora-core.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
         'Input Counter',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
