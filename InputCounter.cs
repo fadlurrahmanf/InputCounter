@@ -176,7 +176,12 @@ public sealed class InputCounterForm : Form
             MoveToBottomLeft();
             auraWindow = new AuraWindow(this);
             PointF core = AuraCoreCenter();
-            auraWindow.Location = new Point(Location.X + HudWidth / 2 - (int)core.X, Location.Y - 108 - (int)core.Y);
+            // The Core begins at the top centre of the primary working area,
+            // independently from the bottom-left HUD. It remains draggable.
+            Rectangle workArea = Screen.PrimaryScreen.WorkingArea;
+            int coreScreenX = workArea.Left + workArea.Width / 2;
+            int coreScreenY = workArea.Top + 160;
+            auraWindow.Location = new Point(coreScreenX - (int)core.X, coreScreenY - (int)core.Y);
             auraWindow.Show();
         };
         shakeTimer.Interval = 55;
