@@ -1272,18 +1272,13 @@ public sealed class InputCounterForm : Form
             float orbit = radius + 25F + i * 4.2F;
             float x = core.X + (float)Math.Cos(angle) * orbit;
             float y = core.Y + (float)Math.Sin(angle) * orbit * 0.52F;
-            int alpha = (int)(richness * 135);
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(alpha, styleTint))) graphics.FillEllipse(brush, x - 1.25F, y - 1.25F, 2.5F, 2.5F);
-        }
-        for (int glow = 4; glow >= 1; glow--)
-        {
-            float glowRadius = radius + glow * 3.4F;
-            int alpha = (int)((8 + auraSpeed * 16) / glow);
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(alpha, coreTint))) graphics.FillEllipse(brush, core.X - glowRadius, core.Y - glowRadius, glowRadius * 2F, glowRadius * 2F);
+            // Color-key overlays turn semi-transparent pixels into muddy black
+            // pixels. Use a fully coloured mote instead of alpha blending.
+            using (SolidBrush brush = new SolidBrush(styleTint)) graphics.FillEllipse(brush, x - 1.25F, y - 1.25F, 2.5F, 2.5F);
         }
         DrawAuroraHalo(graphics, core, radius);
-        using (SolidBrush coreBrush = new SolidBrush(Color.FromArgb(235, coreTint))) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
-        using (SolidBrush highlight = new SolidBrush(Color.FromArgb(225, Color.White))) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
+        using (SolidBrush coreBrush = new SolidBrush(coreTint)) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
+        using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
         // Wind is intentionally drawn over the particle cloud so rapid input
         // remains clearly readable instead of disappearing behind 1,000 dots.
@@ -1302,6 +1297,9 @@ public sealed class InputCounterForm : Form
             Color.FromArgb(120, 220, 255)
         };
         const int segmentCount = 20;
+        System.Drawing.Drawing2D.SmoothingMode oldSmoothing = graphics.SmoothingMode;
+        // Avoid alpha-antialiasing against the transparent-key black backdrop.
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
         for (int layer = 0; layer < 3; layer++)
         {
             float haloRadius = coreRadius + 5F + layer * 2.6F;
@@ -1312,11 +1310,11 @@ public sealed class InputCounterForm : Form
                 int baseIndex = ((int)Math.Floor(colourPosition) % palette.Length + palette.Length) % palette.Length;
                 double blend = colourPosition - Math.Floor(colourPosition);
                 Color baseColour = Blend(palette[baseIndex], palette[(baseIndex + 1) % palette.Length], blend);
-                int alpha = 74 + (int)(26 * (0.5 + 0.5 * Math.Sin(auraPhase * 2.0 + i)));
-                using (Pen aurora = new Pen(Color.FromArgb(alpha, baseColour), 1.1F + layer * 0.20F))
+                using (Pen aurora = new Pen(baseColour, 1.1F + layer * 0.20F))
                     graphics.DrawArc(aurora, bounds, i * 360F / segmentCount - 2F, 360F / segmentCount + 3F);
             }
         }
+        graphics.SmoothingMode = oldSmoothing;
     }
     private void DrawSpeedWind(Graphics graphics, PointF core, float coreRadius)
     {
@@ -1413,7 +1411,7 @@ public sealed class InputCounterForm : Form
     private void DrawAuraParticle(Graphics graphics, AuraParticle particle, Color styleTint, Color coreTint)
     {
         double life = Math.Max(0, particle.Life) / (double)particle.MaxLife;
-        int alpha = (int)(40 + life * 180);
+        int alpha = 255;
         // Colour is sampled once per particle and is intentionally unrelated
         // to its 25x–100x motion tier.
         Color colour = particle.AuraColor;
