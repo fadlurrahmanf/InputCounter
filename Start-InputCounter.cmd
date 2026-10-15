@@ -1,2 +1,2 @@
 @echo off
-start "Input Counter" "%~dp0InputCounter-stars-guaranteed.exe"
+start "Input Counter" "%~dp0InputCounter-stars-front.exe"

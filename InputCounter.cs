@@ -1687,12 +1687,13 @@ public sealed class InputCounterForm : Form
         using (SolidBrush coreBrush = new SolidBrush(coreTint)) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
         using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
-        DrawComboStars(graphics, core, radius);
-        DrawStarAwardAnimation(graphics, core, radius);
         // Wind is intentionally drawn over the particle cloud so rapid input
         // remains clearly readable instead of disappearing behind 1,000 dots.
         DrawSpeedWind(graphics, core, radius);
         DrawOwnedPlanets(graphics, core);
+        // STARs are always the foreground layer, including above planets.
+        DrawComboStars(graphics, core, radius);
+        DrawStarAwardAnimation(graphics, core, radius);
         graphics.SmoothingMode = oldSmoothing;
     }
     private void DrawComboStars(Graphics graphics, PointF core, float coreRadius)
