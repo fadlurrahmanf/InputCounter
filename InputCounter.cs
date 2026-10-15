@@ -94,6 +94,10 @@ public sealed class InputCounterForm : Form
     private float audioLevel;
     private float audioBeat;
     private double audioPhase;
+    // Estimated from the spacing between speaker-output peaks. This stores
+    // only timing, never audio content or samples.
+    private float audioTempo = 0.55F;
+    private DateTime lastAudioBeatAt = DateTime.MinValue;
     private ElementStyle activeElement = ElementStyle.Light;
     private int sessionPeakRate;
     private long sessionInputCount;
@@ -1183,7 +1187,30 @@ public sealed class InputCounterForm : Form
         audioLevel += (rawAudioPeak - audioLevel) * audioSmoothing;
         float transient = Math.Max(0F, rawAudioPeak - audioLevel * 0.82F);
         audioBeat = Math.Min(1F, audioBeat * 0.86F + transient * 1.65F);
-        audioPhase += 0.025 + audioLevel * 0.42 + audioBeat * 0.09;
+        DateTime now = DateTime.UtcNow;
+        // Peaks must be separated enough to be musical beats rather than
+        // timer samples. Their interval maps to a gentle 0.35x–2.0x tempo.
+        bool beatCandidate = rawAudioPeak > 0.025F && transient > 0.018F &&
+            (lastAudioBeatAt == DateTime.MinValue || (now - lastAudioBeatAt).TotalMilliseconds >= 180.0);
+        if (beatCandidate)
+        {
+            if (lastAudioBeatAt != DateTime.MinValue)
+            {
+                double intervalMs = (now - lastAudioBeatAt).TotalMilliseconds;
+                if (intervalMs >= 250.0 && intervalMs <= 1500.0)
+                {
+                    float inferredTempo = (float)Math.Max(0.35, Math.Min(2.0, 60000.0 / intervalMs / 105.0));
+                    audioTempo += (inferredTempo - audioTempo) * 0.34F;
+                }
+            }
+            lastAudioBeatAt = now;
+        }
+        else
+        {
+            float restingTempo = rawAudioPeak > 0.012F ? 0.58F : 0.40F;
+            audioTempo += (restingTempo - audioTempo) * 0.012F;
+        }
+        audioPhase += 0.009 + audioTempo * 0.048 + audioBeat * 0.075;
         double targetSpeed = 1.0 - Math.Exp(-keysPerSecond / 7.0);
         double targetMass = 1.0 - Math.Exp(-Math.Log(1.0 + Math.Abs(totalCount)) / 5.0);
         if (totalCount < 0) targetMass *= 0.82;
@@ -1220,7 +1247,7 @@ public sealed class InputCounterForm : Form
                     ? particle.BaseOrbitRadius * (float)(1.0 - particleSettle) + compactRadius * (float)particleSettle
                     : particle.BaseOrbitRadius;
                 particle.OrbitRadius += (desiredRadius - particle.OrbitRadius) * 0.12F;
-                particle.OrbitAngle += (0.025 + auraSpeed * 0.13 + audioLevel * 0.16 + (particle.Variant % 3) * 0.004) * motionFactor * particle.OrbitDirection;
+                particle.OrbitAngle += (0.025 + auraSpeed * 0.13 + audioLevel * 0.08 + audioTempo * audioLevel * 0.10 + (particle.Variant % 3) * 0.004) * motionFactor * particle.OrbitDirection;
                 // Fast tiers can overshoot radially, but every orbit remains
                 // geometrically circular regardless of speed or direction.
                 float excessSpeed = Math.Max(0F, motionFactor - 0.80F);
@@ -1230,7 +1257,7 @@ public sealed class InputCounterForm : Form
                 particle.RadialVelocity *= 0.965F;
                 particle.RadialOffset += particle.RadialVelocity;
                 particle.RadialOffset = Math.Max(-maxExcursion, Math.Min(maxExcursion, particle.RadialOffset));
-                float audioWave = (float)Math.Sin(audioPhase * 2.0 + particle.Variant * 1.71) * audioLevel * 5.5F;
+                float audioWave = (float)Math.Sin(audioPhase * 2.0 + particle.Variant * 1.71) * audioLevel * (3.5F + audioTempo * 3.5F);
                 float activeRadius = particle.OrbitRadius + particle.RadialOffset + audioWave;
                 float localX = (float)Math.Cos(particle.OrbitAngle) * activeRadius;
                 float localY = (float)Math.Sin(particle.OrbitAngle) * activeRadius;
