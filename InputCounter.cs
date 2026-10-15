@@ -103,7 +103,7 @@ public sealed class InputCounterForm : Form
     private long sessionInputCount;
     private int sessionCriticalCount;
     private static readonly string[] InputEventNames = { "CRIT +2", "CRIT +3", "CRIT +4", "CRIT +5" };
-    private static readonly string[] IdleEventNames = { "REWIND", "RESET 0", "ECHO +1", "ECHO +3", "ECHO +10", "ECHO +20", "DECAY -2", "DECAY -3", "DECAY -5" };
+    private static readonly string[] IdleEventNames = { "REWIND", "ECHO +1", "ECHO +3", "ECHO +10", "ECHO +20", "DECAY -2", "DECAY -3", "DECAY -5" };
     private readonly Dictionary<string, long> inputEventKeyPressCounts = new Dictionary<string, long>();
     private readonly Dictionary<string, long> idleEventDecayedKeyCounts = new Dictionary<string, long>();
     private string bubbleText = "Core ready";
@@ -396,27 +396,17 @@ public sealed class InputCounterForm : Form
     private void RunIdleChance()
     {
         long before = totalCount;
-        // RESET 0 is deliberately only available below zero. It restores the
-        // Daily Total without touching High Total, All Time, or any formula.
-        if (before < 0 && random.NextDouble() < 0.0002)
-        {
-            totalCount = 0;
-            totalDirty = true;
-            SyncAuraParticlesToScore();
-            ShowRareEventBubble("RESET 0", 0.02, false);
-            LogChange("RESET_ZERO", -before, before, totalCount, recentInputs.Count, 0, null);
-            UpdateDisplay();
-            return;
-        }
         // Rewind is a separate 0.001% idle roll so all existing decay/Echo
         // probabilities retain their own distribution.
         if (!rewindCooldownActive && random.NextDouble() < 0.00001)
         {
             RecordDecayedKeys(Math.Max(0, before - lastInputCheckpoint));
-            long doubled = before > long.MaxValue / 2 ? long.MaxValue : before < long.MinValue / 2 ? long.MinValue : before * 2;
-            // A Rewind may recover up to the user's recorded High Total, never
-            // leap over it. This intentionally does not change All Time.
-            totalCount = totalHighScore > 0 && doubled > totalHighScore ? totalHighScore : doubled;
+            long doubled = before < 0 ? 0 : before > long.MaxValue / 2 ? long.MaxValue : before * 2;
+            // Below zero, Rewind restores the Daily Total to neutral zero.
+            // At zero or above, it keeps its existing x2-with-High-Total-cap
+            // behaviour. Neither path changes All Time.
+            if (before < 0) totalCount = 0;
+            else totalCount = totalHighScore > 0 && doubled > totalHighScore ? totalHighScore : doubled;
             totalDirty = true;
             int auraCountBeforeRewind = auraParticles.Count;
             int restored = (int)Math.Min(MaxRenderedAuraParticles, Math.Max(0L, totalCount - before));

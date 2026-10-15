@@ -21,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `InputCounter-reset-zero.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `InputCounter-rewind-reset.exe`. The executable and all local score data are intentionally ignored by Git.
