@@ -1,10 +1,10 @@
 #requires -Version 5.1
 
-$app = Join-Path $PSScriptRoot 'InputCounter-combo-floating.exe'
+$app = Join-Path $PSScriptRoot 'InputCounter-combo-front.exe'
 if (-not (Test-Path -LiteralPath $app)) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
-        'InputCounter-combo-floating.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
+        'InputCounter-combo-front.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
         'Input Counter',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error

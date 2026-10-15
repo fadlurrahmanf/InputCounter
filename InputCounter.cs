@@ -289,10 +289,13 @@ public sealed class InputCounterForm : Form
         if (activeComboStreakEffect == null || !floatingEffects.Contains(activeComboStreakEffect))
         {
             activeComboStreakEffect = new FloatingEffect();
-            activeComboStreakEffect.Increasing = true; activeComboStreakEffect.Critical = true;
+            activeComboStreakEffect.Increasing = true; activeComboStreakEffect.EchoCascade = true; activeComboStreakEffect.FrontControl = true;
             activeComboStreakEffect.CriticalColor = Color.FromArgb(150, 218, 255);
             activeComboStreakEffect.ComboStreak = true;
             activeComboStreakEffect.Label = new EffectLabel { AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", 9.5F), ForeColor = Color.FromArgb(150, 218, 255) };
+            activeComboStreakEffect.Label.MouseDown += WindowMouseDown;
+            Controls.Add(activeComboStreakEffect.Label);
+            activeComboStreakEffect.Label.BringToFront();
             floatingEffects.Add(activeComboStreakEffect);
         }
         activeComboStreakEffect.Label.Text = "COMBO x" + comboStreak;
@@ -669,7 +672,7 @@ public sealed class InputCounterForm : Form
     private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom)
     {
         FloatingEffect effect = new FloatingEffect();
-        effect.Increasing = true; effect.Critical = true;
+        effect.Increasing = true; effect.Critical = true; effect.FrontControl = true;
         effect.X = totalBaseLocation.X + totalLabel.Width - 9;
         effect.Y = totalBaseLocation.Y + random.Next(2, 18);
         double angle = (-150.0 + random.NextDouble() * 120.0) * Math.PI / 180.0;
@@ -681,6 +684,8 @@ public sealed class InputCounterForm : Form
         // The successful probability is the dominant readable visual: direct
         // text over the HUD, with no label background, border, or bubble.
         effect.Label = new CriticalLabel { Text = CompactChance(chancePercent) + "%  +" + bonus, AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Black", coreBloom ? 20F : 16F), ForeColor = effect.CriticalColor };
+        effect.Label.MouseDown += WindowMouseDown;
+        Controls.Add(effect.Label); effect.Label.BringToFront();
         floatingEffects.Add(effect);
     }
     private void TriggerComboCoreExplosion(double chancePercent, bool coreBloom)
@@ -1007,7 +1012,7 @@ public sealed class InputCounterForm : Form
     private void DrawFloatingEffects(Graphics graphics)
     {
         foreach (FloatingEffect effect in floatingEffects)
-            TextRenderer.DrawText(graphics, effect.Label.Text, effect.Label.Font, new Point((int)effect.X, (int)effect.Y), effect.Label.ForeColor, TextFormatFlags.NoPadding);
+            if (!effect.FrontControl) TextRenderer.DrawText(graphics, effect.Label.Text, effect.Label.Font, new Point((int)effect.X, (int)effect.Y), effect.Label.ForeColor, TextFormatFlags.NoPadding);
     }
     private void UpdateBubble()
     {
