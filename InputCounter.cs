@@ -82,6 +82,17 @@ public sealed class InputCounterForm : Form
     private DateTime starCorePulseUntil = DateTime.MinValue;
     private DateTime nearMissCorePulseUntil = DateTime.MinValue;
     private DateTime starRescueRippleUntil = DateTime.MinValue;
+    // Short, score-neutral Aura moments. None of these state fields affect a
+    // score, chance table, combo result, or persisted user data.
+    private DateTime zeroGravityUntil = DateTime.MinValue;
+    private DateTime auraFlickerUntil = DateTime.MinValue;
+    private DateTime gravityDipUntil = DateTime.MinValue;
+    private DateTime auraBreathUntil = DateTime.MinValue;
+    private DateTime orbitWaveUntil = DateTime.MinValue;
+    private DateTime balancedSparkUntil = DateTime.MinValue;
+    private DateTime balancedSparkBurstUntil = DateTime.MinValue;
+    private int balancedSparkSign;
+    private double balancedSparkAngle;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -503,6 +514,7 @@ public sealed class InputCounterForm : Form
         Color? auraArrivalColor = multiplier > 1 ? (Color?)ScoreBonusAuraColor : null;
         SyncAuraParticlesToScore(auraArrivalColor);
         RefreshIncomingAuraParticles(auraCountBeforeInput, multiplier, auraArrivalColor);
+        TriggerPositiveAuraEffects();
         StartIncreaseAnimation(multiplier);
         LogChange(multiplier > 1 ? "INPUT_CRITICAL" : "INPUT_NORMAL", multiplier, totalCount - multiplier, totalCount, recentInputs.Count, multiplier, null);
         UpdateDisplay();
@@ -512,7 +524,10 @@ public sealed class InputCounterForm : Form
         // STAR is evaluated only after a Combo Cascade roll fails. The saved
         // count is consecutive misses since the first STAR drop: 0 -> 0.01%,
         // 1 -> 0.02%, 2 -> 0.03%, and so on.
-        double currentStarChancePercent = Math.Min(100.0, 0.01 * (comboStarFailureCount + 1));
+        // The chance intentionally has no maximum cap. After enough misses it
+        // exceeds 100%, making that later roll certain while still preserving
+        // the exact +0.01 percentage-point progression requested by the user.
+        double currentStarChancePercent = 0.01 * (comboStarFailureCount + 1);
         if (random.NextDouble() * 100.0 >= currentStarChancePercent)
         {
             comboStarFailureCount++;
@@ -609,6 +624,8 @@ public sealed class InputCounterForm : Form
     }
     private void RunIdleChance()
     {
+        // Zero Gravity cancels idle decay only for its two-second visual pause.
+        if (DateTime.UtcNow < zeroGravityUntil) return;
         long before = totalCount;
         // Rewind is a separate 0.001% idle roll so all existing decay/Echo
         // probabilities retain their own distribution.
@@ -677,12 +694,60 @@ public sealed class InputCounterForm : Form
         if (delta > 0) RefreshIncomingAuraParticles(auraCountBeforeIdleEvent, delta, echoArrivalColor);
         if (delta < 0)
         {
+            TriggerNegativeAuraEffects(delta == -1);
             eventName = delta == -1 ? "DECAY_NORMAL" : "DECAY_CRITICAL";
             if (rewindGreenActive) { rewindDecayDebt += -delta; if (rewindDecayDebt >= 100) { rewindGreenActive = false; rewindCooldownActive = false; } }
             StartDecreaseAnimation(delta == -1, delta < -1);
         }
-        else { eventName = "ECHO_CASCADE"; StartEchoCascadeAnimation(delta); }
+        else { TriggerPositiveAuraEffects(); eventName = "ECHO_CASCADE"; StartEchoCascadeAnimation(delta); }
         LogChange(eventName, delta, before, totalCount, recentInputs.Count, delta, null);
+    }
+    private void TriggerPositiveAuraEffects()
+    {
+        DateTime now = DateTime.UtcNow;
+        // Aura Breath: +12%, Core and surrounding particles swell by 10%.
+        if (now >= auraBreathUntil && random.NextDouble() < 0.12)
+            auraBreathUntil = now.AddMilliseconds(500);
+        // Orbit Wave: +8%, an expanding dotted blue-white ripple.
+        if (now >= orbitWaveUntil && random.NextDouble() < 0.08)
+            orbitWaveUntil = now.AddMilliseconds(760);
+        TriggerBalancedSpark(1, now);
+    }
+    private void TriggerNegativeAuraEffects(bool normalMinusOne)
+    {
+        DateTime now = DateTime.UtcNow;
+        // Zero Gravity and Aura Flicker are deliberately tied to the quiet
+        // normal -1 decay, keeping special Decay event behavior untouched.
+        if (normalMinusOne && random.NextDouble() < 0.002)
+            zeroGravityUntil = now.AddSeconds(2);
+        if (normalMinusOne && random.NextDouble() < 0.10)
+        {
+            auraFlickerUntil = now.AddMilliseconds(400);
+            foreach (AuraParticle particle in auraParticles)
+                particle.AuraFlickerTarget = random.NextDouble() < 0.20;
+        }
+        // Gravity Dip: -5%, a compact pull toward the Core for 0.6 seconds.
+        if (now >= gravityDipUntil && random.NextDouble() < 0.05)
+            gravityDipUntil = now.AddMilliseconds(600);
+        TriggerBalancedSpark(-1, now);
+    }
+    private void TriggerBalancedSpark(int scoreSign, DateTime now)
+    {
+        // Balanced Spark: 1% after either sign. A change of sign during its
+        // five-second life makes the spark break softly without score impact.
+        if (balancedSparkSign != 0 && now < balancedSparkUntil && balancedSparkSign != scoreSign)
+        {
+            balancedSparkBurstUntil = now.AddMilliseconds(650);
+            balancedSparkUntil = now;
+            balancedSparkSign = 0;
+            return;
+        }
+        if (balancedSparkSign == 0 && random.NextDouble() < 0.01)
+        {
+            balancedSparkSign = scoreSign;
+            balancedSparkAngle = random.NextDouble() * Math.PI * 2.0;
+            balancedSparkUntil = now.AddSeconds(5);
+        }
     }
     private void LogChange(string eventName, long delta, long before, long after, int keyPerSecond, int multiplier, long? checkpoint)
     {
@@ -1593,6 +1658,7 @@ public sealed class InputCounterForm : Form
         auraPhase += 0.035 + auraSpeed * 0.15;
         bool quiet = DateTime.UtcNow - lastInputAt > TimeSpan.FromSeconds(1.1);
         PointF core = AuraCoreCenter();
+        float zeroGravityMotion = DateTime.UtcNow < zeroGravityUntil ? 0.28F : 1F;
         for (int i = auraParticles.Count - 1; i >= 0; i--)
         {
             AuraParticle particle = auraParticles[i];
@@ -1621,7 +1687,7 @@ public sealed class InputCounterForm : Form
                     ? particle.BaseOrbitRadius * (float)(1.0 - particleSettle) + compactRadius * (float)particleSettle
                     : particle.BaseOrbitRadius;
                 particle.OrbitRadius += (desiredRadius - particle.OrbitRadius) * 0.12F;
-                particle.OrbitAngle += (0.025 + auraSpeed * 0.13 + audioLevel * 0.08 + audioTempo * audioLevel * 0.10 + (particle.Variant % 3) * 0.004) * motionFactor * particle.OrbitDirection;
+                particle.OrbitAngle += (0.025 + auraSpeed * 0.13 + audioLevel * 0.08 + audioTempo * audioLevel * 0.10 + (particle.Variant % 3) * 0.004) * motionFactor * particle.OrbitDirection * zeroGravityMotion;
                 // Fast tiers can overshoot radially, but every orbit remains
                 // geometrically circular regardless of speed or direction.
                 float excessSpeed = Math.Max(0F, motionFactor - 0.80F);
@@ -1638,6 +1704,13 @@ public sealed class InputCounterForm : Form
                 float tiltCos = (float)Math.Cos(particle.OrbitTilt), tiltSin = (float)Math.Sin(particle.OrbitTilt);
                 float desiredX = core.X + localX * tiltCos - localY * tiltSin;
                 float desiredY = core.Y + localX * tiltSin + localY * tiltCos;
+                if (DateTime.UtcNow < gravityDipUntil)
+                {
+                    double dipProgress = 1.0 - (gravityDipUntil - DateTime.UtcNow).TotalMilliseconds / 600.0;
+                    float pullToCore = 0.28F * (float)Math.Sin(Math.Max(0.0, Math.Min(1.0, dipProgress)) * Math.PI);
+                    desiredX = core.X + (desiredX - core.X) * (1F - pullToCore);
+                    desiredY = core.Y + (desiredY - core.Y) * (1F - pullToCore);
+                }
                 float follow = Math.Min(0.48F, (0.13F + (float)auraSpeed * 0.12F) * (0.72F + motionFactor * 0.28F));
                 particle.X += (desiredX - particle.X) * follow;
                 particle.Y += (desiredY - particle.Y) * follow;
@@ -1669,6 +1742,11 @@ public sealed class InputCounterForm : Form
         System.Drawing.Drawing2D.SmoothingMode oldSmoothing = graphics.SmoothingMode;
         graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         PointF core = AuraCoreCenter();
+        if (DateTime.UtcNow < zeroGravityUntil)
+        {
+            double floatProgress = 1.0 - (zeroGravityUntil - DateTime.UtcNow).TotalMilliseconds / 2000.0;
+            core.Y -= 2.8F + (float)Math.Sin(floatProgress * Math.PI * 2.0) * 2.2F;
+        }
         double memory = AuraMemoryProgress();
         // The Living Core itself remains neutral white. Element selection controls
         // particle shape/path only, keeping rewind from tinting the Core green.
@@ -1691,7 +1769,13 @@ public sealed class InputCounterForm : Form
         // full-screen rays used by the first Audio Aura revision.
         float audioPulse = audioLevel * 0.27F + audioBeat * 0.18F;
         float pulse = 1F + (float)Math.Sin(auraPhase * 2.2 + audioPhase * 0.7) * (0.035F + (float)auraSpeed * 0.12F + audioPulse);
-        float radius = baseRadius * pulse;
+        float auraBreathScale = 1F;
+        if (DateTime.UtcNow < auraBreathUntil)
+        {
+            double breathProgress = 1.0 - (auraBreathUntil - DateTime.UtcNow).TotalMilliseconds / 500.0;
+            auraBreathScale += 0.10F * (float)Math.Sin(Math.Max(0.0, Math.Min(1.0, breathProgress)) * Math.PI);
+        }
+        float radius = baseRadius * pulse * auraBreathScale;
 
         // Permanent all-time memory appears as increasingly visible peripheral motes,
         // not as a score modifier or a hard milestone unlock.
@@ -1709,15 +1793,17 @@ public sealed class InputCounterForm : Form
         }
         DrawAuroraHalo(graphics, core, radius);
         DrawAudioAuraEffects(graphics, core, radius);
+        DrawOrbitWave(graphics, core, radius);
         DrawComboCoreExplosion(graphics, core, radius);
         using (SolidBrush coreBrush = new SolidBrush(coreTint)) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
         using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
-        foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
+        foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint, auraBreathScale);
         // Wind is intentionally drawn over the particle cloud so rapid input
         // remains clearly readable instead of disappearing behind 1,000 dots.
         DrawSpeedWind(graphics, core, radius);
         DrawOwnedPlanets(graphics, core);
         DrawStarRescueRipple(graphics, core, radius);
+        DrawBalancedSpark(graphics, core, radius);
         // STARs are always the foreground layer, including above planets.
         DrawComboStars(graphics, core, radius);
         DrawStarAwardAnimation(graphics, core, radius);
@@ -1971,7 +2057,48 @@ public sealed class InputCounterForm : Form
             default: return Color.White;
         }
     }
-    private void DrawAuraParticle(Graphics graphics, AuraParticle particle, Color styleTint, Color coreTint)
+    private void DrawOrbitWave(Graphics graphics, PointF core, float coreRadius)
+    {
+        if (DateTime.UtcNow >= orbitWaveUntil) return;
+        double progress = 1.0 - (orbitWaveUntil - DateTime.UtcNow).TotalMilliseconds / 760.0;
+        progress = Math.Max(0.0, Math.Min(1.0, progress));
+        float orbit = coreRadius + 8F + (float)progress * 105F;
+        int dotCount = 24;
+        float size = 2.8F - (float)progress * 1.65F;
+        for (int i = 0; i < dotCount; i++)
+        {
+            double angle = i * Math.PI * 2.0 / dotCount + auraPhase * 0.35;
+            Color colour = (i % 5 == 0) ? Color.White : Color.FromArgb(112, 204, 255);
+            float x = core.X + (float)Math.Cos(angle) * orbit;
+            float y = core.Y + (float)Math.Sin(angle) * orbit * 0.66F;
+            using (SolidBrush brush = new SolidBrush(colour)) graphics.FillEllipse(brush, x - size / 2F, y - size / 2F, size, size);
+        }
+    }
+    private void DrawBalancedSpark(Graphics graphics, PointF core, float coreRadius)
+    {
+        DateTime now = DateTime.UtcNow;
+        if (now < balancedSparkUntil && balancedSparkSign != 0)
+        {
+            double elapsed = (balancedSparkUntil - now).TotalMilliseconds;
+            double angle = balancedSparkAngle + auraPhase * (balancedSparkSign > 0 ? 0.85 : -0.85);
+            float orbit = coreRadius + 24F + (float)Math.Sin(elapsed * 0.008) * 2F;
+            float x = core.X + (float)Math.Cos(angle) * orbit;
+            float y = core.Y + (float)Math.Sin(angle) * orbit * 0.62F;
+            DrawAuraStar(graphics, x, y, 3.1F, Color.FromArgb(255, 238, 142));
+        }
+        if (now >= balancedSparkBurstUntil) return;
+        double burstProgress = 1.0 - (balancedSparkBurstUntil - now).TotalMilliseconds / 650.0;
+        for (int i = 0; i < 8; i++)
+        {
+            double angle = balancedSparkAngle + i * Math.PI * 2.0 / 8.0;
+            float orbit = coreRadius + 24F + (float)burstProgress * 26F;
+            float size = 2.4F - (float)burstProgress * 1.5F;
+            float x = core.X + (float)Math.Cos(angle) * orbit;
+            float y = core.Y + (float)Math.Sin(angle) * orbit * 0.62F;
+            using (SolidBrush brush = new SolidBrush(Color.FromArgb(255, 238, 142))) graphics.FillEllipse(brush, x - size / 2F, y - size / 2F, size, size);
+        }
+    }
+    private void DrawAuraParticle(Graphics graphics, AuraParticle particle, Color styleTint, Color coreTint, float eventScale)
     {
         double life = Math.Max(0, particle.Life) / (double)particle.MaxLife;
         int alpha = 255;
@@ -1982,13 +2109,15 @@ public sealed class InputCounterForm : Form
             colour = DecayRedVariant(particle.AuraColor);
         else if (DateTime.UtcNow < auraRewindGreenUntil && particle.RewindGreenTarget)
             colour = RewindAuraColor;
+        else if (DateTime.UtcNow < auraFlickerUntil && particle.AuraFlickerTarget)
+            colour = (Environment.TickCount / 65) % 2 == 0 ? Color.White : Blend(particle.AuraColor, Color.White, 0.45);
         double settle = GetParticleSettleProgress(particle);
         int interval = Math.Max(1, particle.ScaleIntervalMilliseconds);
         double scalePhase = (DateTime.UtcNow - particle.CreatedAt).TotalMilliseconds / interval * Math.PI * 2.0 + particle.ScalePhaseRadians;
         // Every particle breathes independently from 50% to 150% of normal
         // size, using its own sampled 0–1000 ms interval.
         float breathe = 1F + 0.5F * (float)Math.Sin(scalePhase);
-        float scale = (1F - (float)settle * 0.72F) * breathe;
+        float scale = (1F - (float)settle * 0.72F) * breathe * eventScale;
         if (settle >= 0.995)
         {
             // Final resting dot: exactly one tenth of the former 1.1px diameter.
@@ -2042,7 +2171,7 @@ public sealed class InputCounterForm : Form
         internal int SpeedTier, ScaleIntervalMilliseconds;
         internal double ScalePhaseRadians;
         internal Color AuraColor;
-        internal bool Entering, DecayRedTarget, RewindGreenTarget;
+        internal bool Entering, DecayRedTarget, RewindGreenTarget, AuraFlickerTarget;
     }
     private sealed class RareBubbleMessage
     {

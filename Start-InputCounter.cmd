@@ -1,2 +1,2 @@
 @echo off
-start "Aura Code" "%~dp0AuraCode-star-progressive.exe"
+start "Aura Code" "%~dp0AuraCode-star-progressive-aura-effects.exe"
