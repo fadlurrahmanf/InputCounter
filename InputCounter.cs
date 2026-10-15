@@ -69,6 +69,11 @@ public sealed class InputCounterForm : Form
     private readonly List<FloatingEffect> floatingEffects = new List<FloatingEffect>();
     private FloatingEffect activeComboStreakEffect;
     private FloatingEffect activeComboChanceEffect;
+    // Roll outcomes are calculated immediately, but their visual feedback is
+    // played one at a time so a successful +100 can never be overwritten by
+    // the following +75 in the same paint frame.
+    private readonly Queue<ComboCascadeVisual> queuedComboCascadeVisuals = new Queue<ComboCascadeVisual>();
+    private DateTime activeComboVisualUntil = DateTime.MinValue;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -302,6 +307,7 @@ public sealed class InputCounterForm : Form
         // A single live streak text flies out of Total; each next key refreshes
         // it instead of creating a stationary HUD label or a text trail.
         if (comboStreak < 2) return;
+        if (HasQueuedComboCascadeVisual()) return;
         ClearComboChanceVisual();
         if (activeComboStreakEffect == null || !floatingEffects.Contains(activeComboStreakEffect))
         {
@@ -390,7 +396,7 @@ public sealed class InputCounterForm : Form
         {
             long bonus = before > long.MaxValue / 3 ? long.MaxValue - before : before / 2;
             totalCount += bonus;
-            SpawnComboChanceEffect(bonus, 0.5, true);
+            QueueComboCascadeVisual(bonus, 0.5, true, true);
         }
         totalDirty = true;
         int beforeCount = auraParticles.Count;
@@ -398,7 +404,6 @@ public sealed class InputCounterForm : Form
         int restored = (int)Math.Min(MaxRenderedAuraParticles, Math.Max(0L, totalCount - before));
         if (restored > 0) RefreshIncomingAuraParticles(beforeCount, restored, ComboAuraColor);
         comboFlashFrames = Math.Max(comboFlashFrames, 100);
-        TriggerComboCoreExplosion(0.5, true);
         LogChange("CORE_BLOOM", totalCount - before, before, totalCount, recentInputs.Count, 0, null);
     }
     private void RecordDecayedKeys(long amount)
@@ -708,25 +713,39 @@ public sealed class InputCounterForm : Form
     }
     private void StartComboCascadeVisual(int bonus, double chancePercent, bool coreBloom)
     {
+        QueueComboCascadeVisual(bonus, chancePercent, coreBloom, true);
+    }
+    private void StartComboFailureVisual(double chancePercent)
+    {
+        QueueComboCascadeVisual(0, chancePercent, false, false);
+    }
+    private void QueueComboCascadeVisual(long bonus, double chancePercent, bool coreBloom, bool succeeded)
+    {
+        queuedComboCascadeVisuals.Enqueue(new ComboCascadeVisual { Bonus = bonus, ChancePercent = chancePercent, CoreBloom = coreBloom, Succeeded = succeeded });
+        totalAnimationTimer.Start();
+    }
+    private bool HasQueuedComboCascadeVisual()
+    {
+        return activeComboChanceEffect != null || queuedComboCascadeVisuals.Count > 0;
+    }
+    private void AdvanceComboCascadeVisualQueue()
+    {
+        DateTime now = DateTime.UtcNow;
+        if (activeComboChanceEffect != null && now < activeComboVisualUntil) return;
+        if (activeComboChanceEffect != null) ClearComboChanceVisual();
+        if (queuedComboCascadeVisuals.Count == 0) return;
+        ComboCascadeVisual step = queuedComboCascadeVisuals.Dequeue();
         // Combo feedback never displaces the Total label. Its text is drawn
         // only by the dedicated foreground overlay.
         increaseAnimationFrames = 0;
         decreaseAnimationFrames = 0;
         totalLabel.Location = totalBaseLocation;
-        comboFlashFrames = Math.Max(comboFlashFrames, coreBloom ? 82 : 24);
-        SpawnComboChanceEffect(bonus, chancePercent, coreBloom, true);
-        TriggerComboCoreExplosion(chancePercent, coreBloom);
-        totalAnimationTimer.Start();
-    }
-    private void StartComboFailureVisual(double chancePercent)
-    {
-        // A failed roll is still readable feedback, but it never moves Total,
-        // changes score, or emits a +bonus value.
-        increaseAnimationFrames = 0;
-        decreaseAnimationFrames = 0;
-        totalLabel.Location = totalBaseLocation;
-        SpawnComboChanceEffect(0, chancePercent, false, false);
-        totalAnimationTimer.Start();
+        comboFlashFrames = Math.Max(comboFlashFrames, step.CoreBloom ? 82 : step.Succeeded ? 24 : 0);
+        SpawnComboChanceEffect(step.Bonus, step.ChancePercent, step.CoreBloom, step.Succeeded);
+        if (step.Succeeded) TriggerComboCoreExplosion(step.ChancePercent, step.CoreBloom);
+        // Each outcome has its own readable turn. The final failed percentage
+        // stays slightly longer, then the speech bubble can resume.
+        activeComboVisualUntil = now.AddMilliseconds(step.Succeeded ? 800 : 1150);
     }
     private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom)
     {
@@ -782,6 +801,7 @@ public sealed class InputCounterForm : Form
     }
     private void RenderTotalAnimation()
     {
+        AdvanceComboCascadeVisualQueue();
         UpdateParticles();
         UpdateFloatingEffects();
         Invalidate();
@@ -811,7 +831,7 @@ public sealed class InputCounterForm : Form
             comboFlashFrames--;
         }
         if (comboOwnsFloatingSlot) totalLabel.Location = totalBaseLocation;
-        if (increaseAnimationFrames <= 0 && decreaseAnimationFrames <= 0 && comboFlashFrames <= 0 && particles.Count == 0 && floatingEffects.Count == 0)
+        if (increaseAnimationFrames <= 0 && decreaseAnimationFrames <= 0 && comboFlashFrames <= 0 && particles.Count == 0 && floatingEffects.Count == 0 && !HasQueuedComboCascadeVisual())
         {
             totalLabel.Location = totalBaseLocation;
             totalLabel.ForeColor = currentSpeedColor;
@@ -1280,7 +1300,7 @@ public sealed class InputCounterForm : Form
     }
     private bool HasActiveComboVisual()
     {
-        if (comboStreak >= 2) return true;
+        if (comboStreak >= 2 || HasQueuedComboCascadeVisual()) return true;
         foreach (FloatingEffect effect in floatingEffects)
             if ((effect.ComboStreak || effect.ComboCascade) && effect.Life > 0) return true;
         return false;
@@ -1868,6 +1888,13 @@ public sealed class InputCounterForm : Form
         internal string Text;
         internal Color ColorA;
         internal Color ColorB;
+    }
+    private sealed class ComboCascadeVisual
+    {
+        internal long Bonus;
+        internal double ChancePercent;
+        internal bool CoreBloom;
+        internal bool Succeeded;
     }
     private enum ElementStyle
     {

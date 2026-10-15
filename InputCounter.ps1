@@ -1,10 +1,10 @@
 #requires -Version 5.1
 
-$app = Join-Path $PSScriptRoot 'InputCounter-combo-aura-colors.exe'
+$app = Join-Path $PSScriptRoot 'InputCounter-combo-cascade-sequence.exe'
 if (-not (Test-Path -LiteralPath $app)) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
-        'InputCounter-combo-aura-colors.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
+        'InputCounter-combo-cascade-sequence.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
         'Input Counter',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
