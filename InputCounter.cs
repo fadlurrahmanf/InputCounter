@@ -299,8 +299,9 @@ public sealed class InputCounterForm : Form
             floatingEffects.Add(activeComboStreakEffect);
         }
         activeComboStreakEffect.Label.Text = "COMBO x" + comboStreak;
-        activeComboStreakEffect.X = totalBaseLocation.X + totalLabel.Width - 42;
-        activeComboStreakEffect.Y = totalBaseLocation.Y + 4;
+        Size comboSize = activeComboStreakEffect.Label.GetPreferredSize(Size.Empty);
+        activeComboStreakEffect.X = Math.Max(2, Math.Min(ClientSize.Width - comboSize.Width - 2, totalBaseLocation.X + (totalLabel.Width - comboSize.Width) / 2));
+        activeComboStreakEffect.Y = Math.Max(2, totalBaseLocation.Y - comboSize.Height - 3);
         activeComboStreakEffect.VelocityX = 0.35F + (float)random.NextDouble() * 0.35F;
         activeComboStreakEffect.VelocityY = -1.05F - (float)random.NextDouble() * 0.45F;
         activeComboStreakEffect.Life = activeComboStreakEffect.MaxLife = 42;
@@ -683,7 +684,23 @@ public sealed class InputCounterForm : Form
         effect.CriticalColor = coreBloom ? Color.White : Color.FromArgb(115, 205, 255);
         // The successful probability is the dominant readable visual: direct
         // text over the HUD, with no label background, border, or bubble.
-        effect.Label = new CriticalLabel { Text = CompactChance(chancePercent) + "%  +" + bonus, AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Black", coreBloom ? 20F : 16F), ForeColor = effect.CriticalColor };
+        string cascadeText = CompactChance(chancePercent) + "%  +" + bonus;
+        float cascadeFontSize = coreBloom ? 20F : 16F;
+        Font cascadeFont = null;
+        Size cascadeMeasure = Size.Empty;
+        while (true)
+        {
+            cascadeFont = new Font("Segoe UI Black", cascadeFontSize);
+            cascadeMeasure = TextRenderer.MeasureText(cascadeText, cascadeFont, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+            if (cascadeMeasure.Width <= ClientSize.Width - 4 || cascadeFontSize <= 7F) break;
+            cascadeFont.Dispose();
+            cascadeFontSize -= 0.5F;
+        }
+        effect.Label = new CriticalLabel { Text = cascadeText, AutoSize = true, BackColor = Color.Transparent, Font = cascadeFont, ForeColor = effect.CriticalColor };
+        effect.ComboCascade = true;
+        Size chanceSize = effect.Label.GetPreferredSize(Size.Empty);
+        effect.X = Math.Max(2, Math.Min(ClientSize.Width - chanceSize.Width - 2, totalBaseLocation.X + (totalLabel.Width - chanceSize.Width) / 2));
+        effect.Y = Math.Max(2, totalBaseLocation.Y - chanceSize.Height - 3);
         effect.Label.MouseDown += WindowMouseDown;
         Controls.Add(effect.Label); effect.Label.BringToFront();
         floatingEffects.Add(effect);
@@ -928,6 +945,13 @@ public sealed class InputCounterForm : Form
             }
             effect.Life--;
             Size textSize = TextRenderer.MeasureText(effect.Label.Text, effect.Label.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+            if (effect.ComboStreak || effect.ComboCascade)
+            {
+                // Combo visuals remain entirely inside the narrow HUD window;
+                // they never disappear through its left/right/top edges.
+                effect.X = Math.Max(2F, Math.Min(ClientSize.Width - textSize.Width - 2F, effect.X));
+                effect.Y = Math.Max(2F, effect.Y);
+            }
             Rectangle textBounds = new Rectangle((int)effect.X, (int)effect.Y, textSize.Width, textSize.Height);
             if (effect.FrontControl) effect.Label.Location = textBounds.Location;
             // REWIND is deliberately placed in the clear flight area, so retain it
@@ -936,7 +960,7 @@ public sealed class InputCounterForm : Form
             double visibility = effect.Rewind && effect.Life > 18 ? 1.0 : effect.Rewind ? effect.Life / 18.0 : effect.Life / (double)effect.MaxLife;
             Color target = effect.Critical || effect.Burst || effect.EchoCascade ? effect.CriticalColor : effect.Increasing ? Color.White : Color.FromArgb(135, 190, 255);
             effect.Label.ForeColor = Blend(BackColor, target, visibility);
-            if (effect.Critical && !effect.Rewind)
+            if (effect.Critical && !effect.Rewind && !effect.ComboCascade)
             {
                 CriticalLabel criticalLabel = effect.Label as CriticalLabel;
                 float size = (9F + effect.Multiplier * 1.8F) * (0.82F + (float)visibility * 0.18F);
@@ -1119,6 +1143,9 @@ public sealed class InputCounterForm : Form
     private void DrawBubble(Graphics graphics)
     {
         if (planetGachaActive) { DrawPlanetGachaBubble(graphics); return; }
+        // Normal speech never competes with a live or resolving Combo. Rare
+        // notifications retain priority and may still be shown when required.
+        if (!bubbleShowsRareChance && HasActiveComboVisual()) return;
         DateTime now = DateTime.UtcNow;
         double enter = Math.Min(1.0, Math.Max(0.0, (now - bubbleAppearedAt).TotalMilliseconds / 180.0));
         float yOffset = (float)((1.0 - enter) * 6.0);
@@ -1149,6 +1176,13 @@ public sealed class InputCounterForm : Form
             RectangleF bounds = new RectangleF((HudWidth - width) / 2F, hudTop - 5F - height - yOffset, width, height);
             DrawBubbleBody(graphics, bounds, measureFont);
         }
+    }
+    private bool HasActiveComboVisual()
+    {
+        if (comboStreak >= 2) return true;
+        foreach (FloatingEffect effect in floatingEffects)
+            if ((effect.ComboStreak || effect.ComboCascade) && effect.Life > 0) return true;
+        return false;
     }
     private void DrawPlanetGachaBubble(Graphics graphics)
     {
@@ -1755,7 +1789,7 @@ public sealed class InputCounterForm : Form
         internal Label Label;
         internal float X, Y, VelocityX, VelocityY, Life, MaxLife;
         internal bool Increasing;
-        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak;
+        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak, ComboCascade;
         internal int Multiplier;
         internal Color CriticalColor;
     }

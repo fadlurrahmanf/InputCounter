@@ -1,2 +1,2 @@
 @echo off
-start "Input Counter" "%~dp0InputCounter-combo-front.exe"
+start "Input Counter" "%~dp0InputCounter-combo-layout.exe"
