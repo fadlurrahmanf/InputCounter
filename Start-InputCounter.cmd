@@ -1,2 +1,2 @@
 @echo off
-start "Aura Code" "%~dp0AuraCode-star-front-combo-bold.exe"
+start "Aura Code" "%~dp0AuraCode-parameter-lines.exe"
