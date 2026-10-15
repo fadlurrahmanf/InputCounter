@@ -189,7 +189,7 @@ public sealed class InputCounterForm : Form
         auraTimer.Tick += delegate { UpdateTypingAura(); };
         auraTimer.Start();
         bubbleTimer.Interval = 100;
-        bubbleTimer.Tick += delegate { UpdateBubble(); };
+        bubbleTimer.Tick += delegate { UpdateBubble(); Invalidate(); };
         bubbleTimer.Start();
         // Repaint the keyed transparent surface from a clean frame. This is
         // essential when a bubble disappears: no rounded bubble pixels may
@@ -1121,6 +1121,14 @@ public sealed class InputCounterForm : Form
             bubbleText = String.Empty;
             return;
         }
+        // Combo clears the bubble text while it owns the visual slot. As soon
+        // as it ends, restore a real normal message immediately rather than
+        // waiting for the old 2–10 second rotation deadline.
+        if (String.IsNullOrWhiteSpace(bubbleText))
+        {
+            SetNormalBubble(now);
+            return;
+        }
         int liveRate = recentInputs.Count;
         if (liveRate > 10)
         {
@@ -1207,6 +1215,9 @@ public sealed class InputCounterForm : Form
         // surface while its bare floating glyph is active.
         if (HasActiveComboVisual()) return;
         if (planetGachaActive) { DrawPlanetGachaBubble(graphics); return; }
+        // Defense in depth: an empty message must mean no bubble body, never
+        // a visible rounded card with nothing inside it.
+        if (String.IsNullOrWhiteSpace(bubbleText)) return;
         DateTime now = DateTime.UtcNow;
         double enter = Math.Min(1.0, Math.Max(0.0, (now - bubbleAppearedAt).TotalMilliseconds / 180.0));
         float yOffset = (float)((1.0 - enter) * 6.0);
