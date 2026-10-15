@@ -205,8 +205,8 @@ public sealed class InputCounterForm : Form
         totalHighScoreLabel.BackColor = hudBackground; totalHighScoreLabel.ForeColor = Color.FromArgb(205, 210, 220); totalHighScoreLabel.Font = new Font("Segoe UI", 6.5F); totalHighScoreLabel.Location = new Point(4, hudTop + 35); totalHighScoreLabel.Size = new Size(HudWidth - 8, 11); totalHighScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         detailLabel.BackColor = hudBackground; detailLabel.ForeColor = Color.FromArgb(163, 196, 255); detailLabel.Font = new Font("Segoe UI", 8F); detailLabel.Location = new Point(4, hudTop + 48); detailLabel.Size = new Size(HudWidth - 8, 15); detailLabel.TextAlign = ContentAlignment.MiddleCenter;
         highScoreLabel.BackColor = hudBackground; highScoreLabel.ForeColor = Color.FromArgb(163, 196, 255); highScoreLabel.Font = new Font("Segoe UI", 6.5F); highScoreLabel.Location = new Point(4, hudTop + 66); highScoreLabel.Size = new Size(HudWidth - 8, 13); highScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
-        allTimeLabel.BackColor = hudBackground; allTimeLabel.ForeColor = Color.FromArgb(205, 210, 220); allTimeLabel.Font = new Font("Segoe UI", 6.2F); allTimeLabel.Location = new Point(4, hudTop + 83); allTimeLabel.Size = new Size(106, 13); allTimeLabel.TextAlign = ContentAlignment.MiddleLeft;
-        starCountLabel.BackColor = hudBackground; starCountLabel.ForeColor = Color.FromArgb(255, 232, 92); starCountLabel.Font = new Font("Segoe UI Semibold", 6.5F); starCountLabel.Location = new Point(108, hudTop + 83); starCountLabel.Size = new Size(HudWidth - 112, 13); starCountLabel.TextAlign = ContentAlignment.MiddleRight;
+        allTimeLabel.BackColor = hudBackground; allTimeLabel.ForeColor = Color.FromArgb(205, 210, 220); allTimeLabel.Font = new Font("Segoe UI", 6.5F); allTimeLabel.Location = new Point(4, hudTop + 83); allTimeLabel.Size = new Size(HudWidth - 8, 13); allTimeLabel.TextAlign = ContentAlignment.MiddleCenter;
+        starCountLabel.BackColor = hudBackground; starCountLabel.ForeColor = Color.FromArgb(255, 232, 92); starCountLabel.Font = new Font("Segoe UI", 7F, FontStyle.Bold); starCountLabel.Location = new Point(4, hudTop + 98); starCountLabel.Size = new Size(HudWidth - 8, 14); starCountLabel.TextAlign = ContentAlignment.MiddleCenter;
         highScore = 0;
         totalCount = LoadTotalCount();
         lastInputCheckpoint = totalCount;
@@ -365,7 +365,7 @@ public sealed class InputCounterForm : Form
             activeComboStreakEffect.Increasing = true; activeComboStreakEffect.FrontControl = true;
             activeComboStreakEffect.CriticalColor = Color.FromArgb(150, 218, 255);
             activeComboStreakEffect.ComboStreak = true;
-            activeComboStreakEffect.Label = new EffectLabel { AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", 9.5F), ForeColor = Color.FromArgb(150, 218, 255) };
+            activeComboStreakEffect.Label = new EffectLabel { AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI", 9.5F, FontStyle.Bold), ForeColor = Color.FromArgb(150, 218, 255) };
             floatingEffects.Add(activeComboStreakEffect);
         }
         activeComboStreakEffect.Label.Text = "COMBO x" + comboStreak;
@@ -1779,7 +1779,8 @@ public sealed class InputCounterForm : Form
         DrawOwnedPlanets(graphics, core);
         DrawStarRescueRipple(graphics, core, radius);
         DrawBalancedSpark(graphics, core, radius);
-        // STARs are always the foreground layer, including above planets.
+        // Persistent and incoming STARs are rendered last, above every Aura
+        // particle, wind stroke, planet, and other Core effect.
         DrawComboStars(graphics, core, radius);
         DrawStarAwardAnimation(graphics, core, radius);
         graphics.SmoothingMode = oldSmoothing;
