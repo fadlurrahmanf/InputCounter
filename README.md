@@ -21,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `AuraCode-parameter-lines.exe`. Its live configuration dashboard is saved at `%LocalAppData%\\AuraCode\\aura-parameters.md` and reloads saved edits within one second. The executable and local score data are intentionally ignored by Git.
+The build script creates `AuraCode-dual-star-report.exe`. Its live configuration dashboard is saved at `%LocalAppData%\\AuraCode\\aura-parameters.md` and reloads saved edits within one second. The executable and local score data are intentionally ignored by Git.

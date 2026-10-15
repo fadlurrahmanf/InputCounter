@@ -75,7 +75,17 @@ public sealed class InputCounterForm : Form
     private readonly Queue<ComboCascadeVisual> queuedComboCascadeVisuals = new Queue<ComboCascadeVisual>();
     private DateTime activeComboVisualUntil = DateTime.MinValue;
     private long comboStarCount;
+    // This is exclusively the progressive 0.01% -> 0.02% STAR path.
     private long comboStarFailureCount;
+    // This is intentionally independent: it advances on every failed Combo
+    // Cascade roll, including one that happened to drop a progressive STAR.
+    private long comboStarGuaranteedFailureCount;
+    private long comboStarProgressiveAwardCount;
+    private long comboStarGuaranteedAwardCount;
+    private long comboStarChainAwardCount;
+    private int starLastAwardTotal;
+    private int starLastChainAwardCount;
+    private string starLastAwardPath = "none";
     private bool comboStarsDirty;
     private readonly Queue<StarAwardVisual> queuedStarAwards = new Queue<StarAwardVisual>();
     private StarAwardVisual activeStarAward;
@@ -560,21 +570,47 @@ public sealed class InputCounterForm : Form
         if (random.NextDouble() * 100.0 >= currentStarChancePercent)
         {
             comboStarFailureCount++;
-            comboStarsDirty = true;
             starLastRollResult = "miss";
-            return;
+        }
+        else
+        {
+            comboStarFailureCount = 0;
+            AwardStarWithChain(StarAwardPath.Progressive);
         }
 
-        comboStarFailureCount = 0;
-        starLastRollResult = "drop";
-        AwardComboStar();
-        // Once the progressive first drop succeeds, each extra STAR rolls 50%
-        // until the first miss. There is intentionally no collection or chain cap.
-        while (random.NextDouble() * 100.0 < starChainChancePercent) AwardComboStar();
+        // The guaranteed path is deliberately evaluated independently of the
+        // progressive result above. A progressive drop never erases progress
+        // toward this exact every-100th-failed-Combo STAR.
+        comboStarGuaranteedFailureCount++;
+        if (comboStarGuaranteedFailureCount == 100)
+        {
+            comboStarGuaranteedFailureCount = 0;
+            AwardStarWithChain(StarAwardPath.Guaranteed);
+        }
+        comboStarsDirty = true;
     }
-    private void AwardComboStar()
+    private void AwardStarWithChain(StarAwardPath path)
+    {
+        int chainAwards = 0;
+        AwardComboStar(path);
+        // Each first STAR, whether Progressive or Guaranteed, receives its own
+        // independent 50% continuation rolls until the first miss.
+        while (random.NextDouble() * 100.0 < starChainChancePercent)
+        {
+            AwardComboStar(StarAwardPath.Chain);
+            chainAwards++;
+        }
+        starLastAwardPath = path == StarAwardPath.Progressive ? "progressive" : "guaranteed";
+        starLastChainAwardCount = chainAwards;
+        starLastAwardTotal = 1 + chainAwards;
+        starLastRollResult = "drop_" + starLastAwardPath + "_plus_" + starLastAwardTotal;
+    }
+    private void AwardComboStar(StarAwardPath path)
     {
         comboStarCount++;
+        if (path == StarAwardPath.Progressive) comboStarProgressiveAwardCount++;
+        else if (path == StarAwardPath.Guaranteed) comboStarGuaranteedAwardCount++;
+        else comboStarChainAwardCount++;
         comboStarsDirty = true;
         queuedStarAwards.Enqueue(new StarAwardVisual { Angle = random.NextDouble() * Math.PI * 2.0, StartedAt = DateTime.MinValue });
     }
@@ -2168,6 +2204,12 @@ public sealed class InputCounterForm : Form
         internal double Angle;
         internal DateTime StartedAt;
     }
+    private enum StarAwardPath
+    {
+        Progressive,
+        Guaranteed,
+        Chain
+    }
     private enum ElementStyle
     {
         Fire = 1, Water, Wind, Earth, Lightning, Ice, Nature, Light, Shadow, Cosmic
@@ -2367,11 +2409,18 @@ public sealed class InputCounterForm : Form
         try
         {
             string[] saved = System.IO.File.ReadAllText(comboStarsPath).Split('|');
-            long stars, failures;
+            long stars, failures, guaranteedFailures, progressiveAwards, guaranteedAwards, chainAwards;
             if (saved.Length >= 1 && long.TryParse(saved[0], out stars)) comboStarCount = Math.Max(0, stars);
-            // Older builds stored their pre-100-failure progress in this field.
-            // Treat it as the progressive miss count so local STAR data survives.
+            // Existing two-field saves are preserved as progressive progress;
+            // the new independent guaranteed counter begins at zero.
             if (saved.Length >= 2 && long.TryParse(saved[1], out failures)) comboStarFailureCount = Math.Max(0, failures);
+            if (saved.Length >= 3 && long.TryParse(saved[2], out guaranteedFailures)) comboStarGuaranteedFailureCount = Math.Max(0, guaranteedFailures % 100);
+            if (saved.Length >= 4 && long.TryParse(saved[3], out progressiveAwards)) comboStarProgressiveAwardCount = Math.Max(0, progressiveAwards);
+            if (saved.Length >= 5 && long.TryParse(saved[4], out guaranteedAwards)) comboStarGuaranteedAwardCount = Math.Max(0, guaranteedAwards);
+            if (saved.Length >= 6 && long.TryParse(saved[5], out chainAwards)) comboStarChainAwardCount = Math.Max(0, chainAwards);
+            // Upgrade the legacy two-field save on the next normal timer tick
+            // so both independent counters survive the next application start.
+            if (saved.Length < 6) comboStarsDirty = true;
         }
         catch { }
     }
@@ -2380,7 +2429,9 @@ public sealed class InputCounterForm : Form
         try
         {
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(comboStarsPath));
-            System.IO.File.WriteAllText(comboStarsPath, comboStarCount + "|" + comboStarFailureCount);
+            System.IO.File.WriteAllText(comboStarsPath,
+                comboStarCount + "|" + comboStarFailureCount + "|" + comboStarGuaranteedFailureCount + "|" +
+                comboStarProgressiveAwardCount + "|" + comboStarGuaranteedAwardCount + "|" + comboStarChainAwardCount);
             comboStarsDirty = false;
         }
         catch { }
@@ -2483,11 +2534,18 @@ public sealed class InputCounterForm : Form
             lines.Add("```ini");
             lines.Add("updated_local: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             lines.Add("star_count: " + comboStarCount);
-            lines.Add("star_failed_rolls_since_drop: " + comboStarFailureCount);
-            lines.Add("star_next_roll_chance_percent: " + nextStarChance.ToString("0.######", culture));
-            lines.Add("star_next_roll_progress_to_100_percent: " + nextStarChance.ToString("0.######", culture) + " / 100.00");
-            lines.Add("star_last_roll_chance_percent: " + starLastRollChancePercent.ToString("0.######", culture));
-            lines.Add("star_last_roll_result: " + starLastRollResult);
+            lines.Add("star_progressive_failed_rolls_since_drop: " + comboStarFailureCount);
+            lines.Add("star_progressive_next_roll_chance_percent: " + nextStarChance.ToString("0.######", culture));
+            lines.Add("star_progressive_next_roll_progress_to_100_percent: " + nextStarChance.ToString("0.######", culture) + " / 100.00");
+            lines.Add("star_guaranteed_failed_rolls: " + comboStarGuaranteedFailureCount + " / 100");
+            lines.Add("star_progressive_first_awards: " + comboStarProgressiveAwardCount);
+            lines.Add("star_guaranteed_first_awards: " + comboStarGuaranteedAwardCount);
+            lines.Add("star_chain_extra_awards: " + comboStarChainAwardCount);
+            lines.Add("star_last_progressive_roll_chance_percent: " + starLastRollChancePercent.ToString("0.######", culture));
+            lines.Add("star_last_progressive_roll_result: " + starLastRollResult);
+            lines.Add("star_last_award_path: " + starLastAwardPath);
+            lines.Add("star_last_award_total_including_chain: " + starLastAwardTotal);
+            lines.Add("star_last_award_chain_extra: " + starLastChainAwardCount);
             lines.Add("idle_decay_minus_2_chance_percent: 0.15");
             lines.Add("idle_decay_minus_3_chance_percent: 0.05");
             lines.Add("idle_decay_minus_5_chance_percent: 0.02");
