@@ -510,6 +510,14 @@ public sealed class InputCounterForm : Form
         comboStarFailureCount++;
         if (comboStarFailureCount != 100) { comboStarsDirty = true; return; }
         comboStarFailureCount = 0;
+        AwardComboStar();
+        // The 100th failure guarantees the first STAR. Each additional STAR
+        // in this same award chain rolls 50% until the first miss; there is
+        // intentionally no collection cap or chain-length cap.
+        while (random.NextDouble() < 0.50) AwardComboStar();
+    }
+    private void AwardComboStar()
+    {
         comboStarCount++;
         comboStarsDirty = true;
         queuedStarAwards.Enqueue(new StarAwardVisual { Angle = random.NextDouble() * Math.PI * 2.0, StartedAt = DateTime.MinValue });
@@ -1909,12 +1917,14 @@ public sealed class InputCounterForm : Form
     }
     private static float PlanetSize(string planet)
     {
-        if (planet == "Jupiter") return 3.8F;
-        if (planet == "Saturn") return 3.35F;
-        if (planet == "Neptune" || planet == "Uranus") return 2.75F;
-        if (planet == "Earth" || planet == "Venus") return 2.55F;
-        if (planet == "Mars") return 2.15F;
-        return 1.75F;
+        // Slightly larger foreground bodies remain readable through the Aura
+        // particle field without changing their distinct cosmetic scale.
+        if (planet == "Jupiter") return 5.1F;
+        if (planet == "Saturn") return 4.5F;
+        if (planet == "Neptune" || planet == "Uranus") return 3.7F;
+        if (planet == "Earth" || planet == "Venus") return 3.45F;
+        if (planet == "Mars") return 2.9F;
+        return 2.4F;
     }
     private static Color PlanetColor(string planet)
     {
