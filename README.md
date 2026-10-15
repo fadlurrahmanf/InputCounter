@@ -1,4 +1,4 @@
-# Input Counter
+# Aura Code
 
 Small, always-on-top Windows HUD that counts physical keyboard and mouse input without recording typed content. It lives in the notification area instead of the taskbar.
 
@@ -21,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `InputCounter-near-miss-rescue-ripple.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `AuraCode-star-progressive.exe`. The executable and all local score data are intentionally ignored by Git.

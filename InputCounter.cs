@@ -151,7 +151,7 @@ public sealed class InputCounterForm : Form
 
     public InputCounterForm()
     {
-        Text = "Input Counter"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
+        Text = "Aura Code"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.Manual;
         ClientSize = new Size(156, 180);
         // A neutral transparency key prevents semi-transparent glow pixels from
@@ -161,7 +161,7 @@ public sealed class InputCounterForm : Form
         // Keep the running app discoverable in Windows' notification area
         // without reserving a taskbar slot for the always-visible HUD.
         trayIcon.Icon = SystemIcons.Application;
-        trayIcon.Text = "Input Counter";
+        trayIcon.Text = "Aura Code";
         trayIcon.Visible = true;
         Color hudBackground = Color.FromArgb(29, 31, 38);
         hudTop = ClientSize.Height - HudHeight;
@@ -244,7 +244,7 @@ public sealed class InputCounterForm : Form
         };
         keyboardProc = KeyboardCallback; mouseProc = MouseCallback;
         keyboardHook = InstallHook(WH_KEYBOARD_LL, keyboardProc); mouseHook = InstallHook(WH_MOUSE_LL, mouseProc);
-        if (keyboardHook == IntPtr.Zero || mouseHook == IntPtr.Zero) MessageBox.Show("Global input hook tidak dapat dipasang. Jalankan ulang aplikasi.", "Input Counter", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        if (keyboardHook == IntPtr.Zero || mouseHook == IntPtr.Zero) MessageBox.Show("Global input hook tidak dapat dipasang. Jalankan ulang aplikasi.", "Aura Code", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
     private static IntPtr InstallHook(int type, HookProc proc)
     { using (Process p = Process.GetCurrentProcess()) using (ProcessModule m = p.MainModule) return SetWindowsHookEx(type, proc, GetModuleHandle(m.ModuleName), 0); }
@@ -365,8 +365,8 @@ public sealed class InputCounterForm : Form
     {
         // Every Combo step uses the same number for both its score bonus and
         // its roll chance: +100 at 100%, then +75 at 75%, +56 at 56%, and so
-        // on. A percentage cannot exceed 100, while the score bonus itself is
-        // left intact for streaks above 100.
+        // on. Long streaks deliberately keep their true opening chance, such
+        // as 125% followed by 93.75%, rather than being capped at 100%.
         double chance = Math.Max(1.0, (double)streak);
         int bonus = Math.Max(1, (int)Math.Round(chance, MidpointRounding.AwayFromZero));
         for (int step = 0; step < 64; step++)
@@ -509,13 +509,21 @@ public sealed class InputCounterForm : Form
     }
     private void RecordComboCascadeFailure()
     {
-        comboStarFailureCount++;
-        if (comboStarFailureCount != 100) { comboStarsDirty = true; return; }
+        // STAR is evaluated only after a Combo Cascade roll fails. The saved
+        // count is consecutive misses since the first STAR drop: 0 -> 0.01%,
+        // 1 -> 0.02%, 2 -> 0.03%, and so on.
+        double currentStarChancePercent = Math.Min(100.0, 0.01 * (comboStarFailureCount + 1));
+        if (random.NextDouble() * 100.0 >= currentStarChancePercent)
+        {
+            comboStarFailureCount++;
+            comboStarsDirty = true;
+            return;
+        }
+
         comboStarFailureCount = 0;
         AwardComboStar();
-        // The 100th failure guarantees the first STAR. Each additional STAR
-        // in this same award chain rolls 50% until the first miss; there is
-        // intentionally no collection cap or chain-length cap.
+        // Once the progressive first drop succeeds, each extra STAR rolls 50%
+        // until the first miss. There is intentionally no collection or chain cap.
         while (random.NextDouble() < 0.50) AwardComboStar();
     }
     private void AwardComboStar()
@@ -2112,7 +2120,7 @@ public sealed class InputCounterForm : Form
         internal AuraWindow(InputCounterForm ownerForm)
         {
             owner = ownerForm;
-            Text = "Input Counter Aura"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
+            Text = "Aura Code Aura"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual; ClientSize = new Size(AuraWindowSize, AuraWindowSize);
             BackColor = Color.Black; TransparencyKey = Color.Black; DoubleBuffered = true;
             Paint += delegate(object sender, PaintEventArgs e) { owner.DrawTypingAura(e.Graphics); };
@@ -2138,7 +2146,7 @@ public sealed class InputCounterForm : Form
         internal EffectOverlayWindow(InputCounterForm ownerForm)
         {
             owner = ownerForm;
-            Text = "Input Counter Effects"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
+            Text = "Aura Code Effects"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual; ClientSize = owner.ClientSize;
             BackColor = Color.Black; TransparencyKey = Color.Black; DoubleBuffered = true;
             Paint += delegate(object sender, PaintEventArgs e) { owner.DrawFrontFloatingEffects(e.Graphics); };
@@ -2256,7 +2264,9 @@ public sealed class InputCounterForm : Form
             string[] saved = System.IO.File.ReadAllText(comboStarsPath).Split('|');
             long stars, failures;
             if (saved.Length >= 1 && long.TryParse(saved[0], out stars)) comboStarCount = Math.Max(0, stars);
-            if (saved.Length >= 2 && long.TryParse(saved[1], out failures)) comboStarFailureCount = Math.Max(0, Math.Min(99, failures));
+            // Older builds stored their pre-100-failure progress in this field.
+            // Treat it as the progressive miss count so local STAR data survives.
+            if (saved.Length >= 2 && long.TryParse(saved[1], out failures)) comboStarFailureCount = Math.Max(0, failures);
         }
         catch { }
     }
