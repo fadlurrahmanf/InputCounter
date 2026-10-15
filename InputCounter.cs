@@ -51,6 +51,9 @@ public sealed class InputCounterForm : Form
     private readonly Random random = new Random();
     private int hudTop;
     private AuraWindow auraWindow;
+    // Combo text is rendered on a separate colour-keyed surface. A child Label
+    // over this transparent parent otherwise retains an opaque backing area.
+    private EffectOverlayWindow effectOverlayWindow;
     private Point restingLocation;
     private bool applyingShake;
     private int shakeXAmplitude = 1;
@@ -63,6 +66,7 @@ public sealed class InputCounterForm : Form
     private readonly List<Particle> particles = new List<Particle>();
     private readonly List<FloatingEffect> floatingEffects = new List<FloatingEffect>();
     private FloatingEffect activeComboStreakEffect;
+    private FloatingEffect activeComboChanceEffect;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -189,7 +193,11 @@ public sealed class InputCounterForm : Form
         bubbleTimer.Start();
         Paint += delegate(object sender, PaintEventArgs e) { DrawParticles(e.Graphics, false); DrawBubble(e.Graphics); DrawParticles(e.Graphics, true); DrawFloatingEffects(e.Graphics); };
         restingLocation = Location;
-        LocationChanged += delegate { if (!applyingShake) restingLocation = Location; };
+        LocationChanged += delegate
+        {
+            if (!applyingShake) restingLocation = Location;
+            if (effectOverlayWindow != null && !effectOverlayWindow.IsDisposed) effectOverlayWindow.Location = Location;
+        };
         Shown += delegate
         {
             MoveToBottomLeft();
@@ -202,6 +210,9 @@ public sealed class InputCounterForm : Form
             int coreScreenY = workArea.Bottom - 70;
             auraWindow.Location = new Point(coreScreenX - (int)core.X, coreScreenY - (int)core.Y);
             auraWindow.Show();
+            effectOverlayWindow = new EffectOverlayWindow(this);
+            effectOverlayWindow.Location = Location;
+            effectOverlayWindow.Show();
         };
         shakeTimer.Interval = 55;
         shakeTimer.Tick += delegate
@@ -278,7 +289,7 @@ public sealed class InputCounterForm : Form
         int resolvedStreak = comboStreak;
         comboStreak = 0;
         lastComboKeyAt = DateTime.MinValue;
-        activeComboStreakEffect = null;
+        ClearComboStreakVisual();
         ResolveComboCascade(resolvedStreak);
     }
     private void UpdateComboStreakIndicator()
@@ -286,6 +297,7 @@ public sealed class InputCounterForm : Form
         // A single live streak text flies out of Total; each next key refreshes
         // it instead of creating a stationary HUD label or a text trail.
         if (comboStreak < 2) return;
+        ClearComboChanceVisual();
         if (activeComboStreakEffect == null || !floatingEffects.Contains(activeComboStreakEffect))
         {
             activeComboStreakEffect = new FloatingEffect();
@@ -293,9 +305,6 @@ public sealed class InputCounterForm : Form
             activeComboStreakEffect.CriticalColor = Color.FromArgb(150, 218, 255);
             activeComboStreakEffect.ComboStreak = true;
             activeComboStreakEffect.Label = new EffectLabel { AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", 9.5F), ForeColor = Color.FromArgb(150, 218, 255) };
-            activeComboStreakEffect.Label.MouseDown += WindowMouseDown;
-            Controls.Add(activeComboStreakEffect.Label);
-            activeComboStreakEffect.Label.BringToFront();
             floatingEffects.Add(activeComboStreakEffect);
         }
         activeComboStreakEffect.Label.Text = "COMBO x" + comboStreak;
@@ -305,7 +314,30 @@ public sealed class InputCounterForm : Form
         activeComboStreakEffect.VelocityX = 0.35F + (float)random.NextDouble() * 0.35F;
         activeComboStreakEffect.VelocityY = -1.05F - (float)random.NextDouble() * 0.45F;
         activeComboStreakEffect.Life = activeComboStreakEffect.MaxLife = 42;
+        // Clear the previous normal message immediately; the dedicated Combo
+        // floating text owns the space above Total while the streak is alive.
+        bubbleText = String.Empty;
+        Invalidate();
         totalAnimationTimer.Start();
+    }
+    private void RemoveComboVisual(FloatingEffect effect)
+    {
+        if (effect == null) return;
+        if (Controls.Contains(effect.Label)) Controls.Remove(effect.Label);
+        floatingEffects.Remove(effect);
+        effect.Label.Dispose();
+    }
+    private void ClearComboStreakVisual()
+    {
+        FloatingEffect effect = activeComboStreakEffect;
+        activeComboStreakEffect = null;
+        RemoveComboVisual(effect);
+    }
+    private void ClearComboChanceVisual()
+    {
+        FloatingEffect effect = activeComboChanceEffect;
+        activeComboChanceEffect = null;
+        RemoveComboVisual(effect);
     }
     private void ResolveComboCascade(int streak)
     {
@@ -665,6 +697,11 @@ public sealed class InputCounterForm : Form
     }
     private void StartComboCascadeVisual(int bonus, double chancePercent, bool coreBloom)
     {
+        // Combo feedback never displaces the Total label. Its text is drawn
+        // only by the dedicated foreground overlay.
+        increaseAnimationFrames = 0;
+        decreaseAnimationFrames = 0;
+        totalLabel.Location = totalBaseLocation;
         comboFlashFrames = Math.Max(comboFlashFrames, coreBloom ? 82 : 24);
         SpawnComboChanceEffect(bonus, chancePercent, coreBloom);
         TriggerComboCoreExplosion(chancePercent, coreBloom);
@@ -672,6 +709,10 @@ public sealed class InputCounterForm : Form
     }
     private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom)
     {
+        // The cascade owns one reserved visual slot. It replaces the streak
+        // text and replaces its own prior step, so no Combo strings overlap.
+        ClearComboStreakVisual();
+        ClearComboChanceVisual();
         FloatingEffect effect = new FloatingEffect();
         effect.Increasing = true; effect.Critical = true; effect.FrontControl = true;
         effect.X = totalBaseLocation.X + totalLabel.Width - 9;
@@ -701,9 +742,8 @@ public sealed class InputCounterForm : Form
         Size chanceSize = effect.Label.GetPreferredSize(Size.Empty);
         effect.X = Math.Max(2, Math.Min(ClientSize.Width - chanceSize.Width - 2, totalBaseLocation.X + (totalLabel.Width - chanceSize.Width) / 2));
         effect.Y = Math.Max(2, totalBaseLocation.Y - chanceSize.Height - 3);
-        effect.Label.MouseDown += WindowMouseDown;
-        Controls.Add(effect.Label); effect.Label.BringToFront();
         floatingEffects.Add(effect);
+        activeComboChanceEffect = effect;
     }
     private void TriggerComboCoreExplosion(double chancePercent, bool coreBloom)
     {
@@ -717,8 +757,10 @@ public sealed class InputCounterForm : Form
         UpdateParticles();
         UpdateFloatingEffects();
         Invalidate();
+        if (effectOverlayWindow != null && !effectOverlayWindow.IsDisposed) effectOverlayWindow.Invalidate();
         totalLabel.Location = totalBaseLocation;
-        if (increaseAnimationFrames > 0)
+        bool comboOwnsFloatingSlot = HasActiveComboVisual();
+        if (!comboOwnsFloatingSlot && increaseAnimationFrames > 0)
         {
             double phase = (7 - increaseAnimationFrames) / 6.0;
             int rise = (int)Math.Round(Math.Sin(phase * Math.PI) * 4.0);
@@ -726,7 +768,7 @@ public sealed class InputCounterForm : Form
             totalLabel.ForeColor = Blend(currentSpeedColor, Color.White, Math.Sin(phase * Math.PI) * 0.75);
             increaseAnimationFrames--;
         }
-        else if (decreaseAnimationFrames > 0)
+        else if (!comboOwnsFloatingSlot && decreaseAnimationFrames > 0)
         {
             double phase = (7 - decreaseAnimationFrames) / 6.0;
             int drop = (int)Math.Round(Math.Sin(phase * Math.PI) * 3.0);
@@ -740,6 +782,7 @@ public sealed class InputCounterForm : Form
             totalLabel.ForeColor = bright ? Color.White : Color.FromArgb(104, 202, 255);
             comboFlashFrames--;
         }
+        if (comboOwnsFloatingSlot) totalLabel.Location = totalBaseLocation;
         if (increaseAnimationFrames <= 0 && decreaseAnimationFrames <= 0 && comboFlashFrames <= 0 && particles.Count == 0 && floatingEffects.Count == 0)
         {
             totalLabel.Location = totalBaseLocation;
@@ -953,7 +996,7 @@ public sealed class InputCounterForm : Form
                 effect.Y = Math.Max(2F, effect.Y);
             }
             Rectangle textBounds = new Rectangle((int)effect.X, (int)effect.Y, textSize.Width, textSize.Height);
-            if (effect.FrontControl) effect.Label.Location = textBounds.Location;
+            if (effect.FrontControl && Controls.Contains(effect.Label)) effect.Label.Location = textBounds.Location;
             // REWIND is deliberately placed in the clear flight area, so retain it
             // for its full duration instead of deleting it on a direction check.
             if (!effect.FrontControl && !effect.Rewind && HitsProtectedLabel(textBounds)) effect.Life = 0;
@@ -969,6 +1012,7 @@ public sealed class InputCounterForm : Form
             if (effect.Life <= 0)
             {
                 if (ReferenceEquals(activeComboStreakEffect, effect)) activeComboStreakEffect = null;
+                if (ReferenceEquals(activeComboChanceEffect, effect)) activeComboChanceEffect = null;
                 if (effect.FrontControl && Controls.Contains(effect.Label)) Controls.Remove(effect.Label);
                 effect.Label.Dispose();
                 floatingEffects.RemoveAt(i);
@@ -1038,6 +1082,14 @@ public sealed class InputCounterForm : Form
         foreach (FloatingEffect effect in floatingEffects)
             if (!effect.FrontControl) TextRenderer.DrawText(graphics, effect.Label.Text, effect.Label.Font, new Point((int)effect.X, (int)effect.Y), effect.Label.ForeColor, TextFormatFlags.NoPadding);
     }
+    // Draw only bare Combo glyphs on the transparent foreground form. The
+    // form's black colour-key background is never painted into the HUD.
+    private void DrawFrontFloatingEffects(Graphics graphics)
+    {
+        foreach (FloatingEffect effect in floatingEffects)
+            if (effect.ComboStreak || effect.ComboCascade)
+                TextRenderer.DrawText(graphics, effect.Label.Text, effect.Label.Font, new Point((int)effect.X, (int)effect.Y), effect.Label.ForeColor, TextFormatFlags.NoPadding);
+    }
     private void UpdateBubble()
     {
         DateTime now = DateTime.UtcNow;
@@ -1058,6 +1110,11 @@ public sealed class InputCounterForm : Form
             bubbleFlashColorA = Color.White;
             bubbleFlashColorB = Color.FromArgb(120, 195, 255);
             SetNormalBubble(now);
+            return;
+        }
+        if (HasActiveComboVisual())
+        {
+            bubbleText = String.Empty;
             return;
         }
         int liveRate = recentInputs.Count;
@@ -1145,7 +1202,13 @@ public sealed class InputCounterForm : Form
         if (planetGachaActive) { DrawPlanetGachaBubble(graphics); return; }
         // Normal speech never competes with a live or resolving Combo. Rare
         // notifications retain priority and may still be shown when required.
-        if (!bubbleShowsRareChance && HasActiveComboVisual()) return;
+        if (!bubbleShowsRareChance && HasActiveComboVisual())
+        {
+            // Bubble pixels are custom-painted, so explicitly restore this
+            // keyed-transparent region instead of leaving a stale bubble frame.
+            using (SolidBrush clear = new SolidBrush(Color.Black)) graphics.FillRectangle(clear, 0, 0, HudWidth, hudTop);
+            return;
+        }
         DateTime now = DateTime.UtcNow;
         double enter = Math.Min(1.0, Math.Max(0.0, (now - bubbleAppearedAt).TotalMilliseconds / 180.0));
         float yOffset = (float)((1.0 - enter) * 6.0);
@@ -1844,6 +1907,24 @@ public sealed class InputCounterForm : Form
             base.WndProc(ref m);
         }
     }
+    private sealed class EffectOverlayWindow : Form
+    {
+        private const int WM_NCHITTEST = 0x0084, HTTRANSPARENT = -1;
+        private readonly InputCounterForm owner;
+        internal EffectOverlayWindow(InputCounterForm ownerForm)
+        {
+            owner = ownerForm;
+            Text = "Input Counter Effects"; TopMost = true; ShowInTaskbar = false; FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.Manual; ClientSize = owner.ClientSize;
+            BackColor = Color.Black; TransparencyKey = Color.Black; DoubleBuffered = true;
+            Paint += delegate(object sender, PaintEventArgs e) { owner.DrawFrontFloatingEffects(e.Graphics); };
+        }
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_NCHITTEST) { m.Result = (IntPtr)HTTRANSPARENT; return; }
+            base.WndProc(ref m);
+        }
+    }
     private sealed class DecayShardLabel : EffectLabel
     {
         internal DecayShardLabel(Color colour, int size)
@@ -2018,7 +2099,7 @@ public sealed class InputCounterForm : Form
             if (!hudBackgroundPanel.Bounds.Contains(point)) m.Result = (IntPtr)HTTRANSPARENT;
         }
     }
-    protected override void OnFormClosed(FormClosedEventArgs e) { trayIcon.Visible = false; trayIcon.Dispose(); audioPeakMonitor.Dispose(); if (auraWindow != null && !auraWindow.IsDisposed) auraWindow.Close(); EnsureDailyTotal(); EnsurePlanetCollectionDate(); SavePlanetCollection(); if (allTimeDirty) SaveAllTimeTotal(); if (totalDirty) SaveTotalCount(); if (totalHighScoreDirty) SaveTotalHighScore(); CommitAuraDiary(); FlushLogs(); shakeTimer.Stop(); totalAnimationTimer.Stop(); auraTimer.Stop(); bubbleTimer.Stop(); if (keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(keyboardHook); if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook); base.OnFormClosed(e); }
+    protected override void OnFormClosed(FormClosedEventArgs e) { trayIcon.Visible = false; trayIcon.Dispose(); audioPeakMonitor.Dispose(); if (effectOverlayWindow != null && !effectOverlayWindow.IsDisposed) effectOverlayWindow.Close(); if (auraWindow != null && !auraWindow.IsDisposed) auraWindow.Close(); EnsureDailyTotal(); EnsurePlanetCollectionDate(); SavePlanetCollection(); if (allTimeDirty) SaveAllTimeTotal(); if (totalDirty) SaveTotalCount(); if (totalHighScoreDirty) SaveTotalHighScore(); CommitAuraDiary(); FlushLogs(); shakeTimer.Stop(); totalAnimationTimer.Stop(); auraTimer.Stop(); bubbleTimer.Stop(); if (keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(keyboardHook); if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook); base.OnFormClosed(e); }
     [STAThread] public static void Main() { Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new InputCounterForm()); }
 }
 
