@@ -1274,7 +1274,9 @@ public sealed class InputCounterForm : Form
         Color styleTint = Color.FromArgb(80, 185, 255);
         Color coreTint = Color.White;
         float baseRadius = 5.5F + (float)auraMass * 7.5F;
-        float audioPulse = audioLevel * 0.16F + audioBeat * 0.11F;
+        // Deliberately noticeable on real speaker output, without the busy
+        // full-screen rays used by the first Audio Aura revision.
+        float audioPulse = audioLevel * 0.27F + audioBeat * 0.18F;
         float pulse = 1F + (float)Math.Sin(auraPhase * 2.2 + audioPhase * 0.7) * (0.035F + (float)auraSpeed * 0.12F + audioPulse);
         float radius = baseRadius * pulse;
 
@@ -1336,9 +1338,8 @@ public sealed class InputCounterForm : Form
     private void DrawAudioAuraEffects(Graphics graphics, PointF core, float coreRadius)
     {
         if (audioLevel < 0.012F) return;
-        // Keep Audio Aura calm: Core pulse, Aurora motion, one small ripple,
-        // and at most two subtle sparks. All pixels remain opaque so the
-        // transparent-key overlay stays clean.
+        // Keep Audio Aura readable rather than crowded: a pair of compact
+        // ripples and a few brighter sparks live close to the Core.
         Color[] colours =
         {
             Color.FromArgb(100, 225, 255), Color.FromArgb(118, 150, 255),
@@ -1346,24 +1347,25 @@ public sealed class InputCounterForm : Form
         };
         System.Drawing.Drawing2D.SmoothingMode oldSmoothing = graphics.SmoothingMode;
         graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-        int rippleCount = 1;
+        int rippleCount = audioBeat > 0.08F ? 2 : 1;
         for (int ring = 0; ring < rippleCount; ring++)
         {
-            float ringRadius = coreRadius + 13F + (float)((audioPhase * 8.0) % 10.0);
+            float ringRadius = coreRadius + 12F + ring * 7F + (float)((audioPhase * 11.0) % 13.0);
             RectangleF bounds = new RectangleF(core.X - ringRadius, core.Y - ringRadius, ringRadius * 2F, ringRadius * 2F);
             Color colour = colours[(ring + (int)(audioPhase * 3.0)) % colours.Length];
-            using (Pen pen = new Pen(colour, 1F))
-                for (int arc = 0; arc < 4; arc++) graphics.DrawArc(pen, bounds, arc * 90F + (float)(audioPhase * 18.0), 12F + audioBeat * 7F);
+            using (Pen pen = new Pen(colour, 1.35F))
+                for (int arc = 0; arc < 5; arc++) graphics.DrawArc(pen, bounds, arc * 72F + (float)(audioPhase * 22.0), 16F + audioBeat * 10F);
         }
-        int sparkleCount = audioBeat > 0.22F ? 2 : 1;
+        int sparkleCount = audioBeat > 0.20F ? 4 : 2;
         for (int sparkle = 0; sparkle < sparkleCount; sparkle++)
         {
             double angle = audioPhase * 1.7 + sparkle * 2.399;
-            float distance = coreRadius + 22F + sparkle * 7F + audioBeat * 7F;
+            float distance = coreRadius + 20F + sparkle * 6F + audioBeat * 10F;
             float x = core.X + (float)Math.Cos(angle) * distance;
             float y = core.Y + (float)Math.Sin(angle) * distance;
             Color colour = colours[(sparkle + 2) % colours.Length];
-            using (SolidBrush sparkleBrush = new SolidBrush(colour)) graphics.FillEllipse(sparkleBrush, x - 0.9F, y - 0.9F, 1.8F, 1.8F);
+            float size = 2.5F + audioBeat * 1.5F;
+            using (SolidBrush sparkleBrush = new SolidBrush(colour)) graphics.FillEllipse(sparkleBrush, x - size / 2F, y - size / 2F, size, size);
         }
         graphics.SmoothingMode = oldSmoothing;
     }
