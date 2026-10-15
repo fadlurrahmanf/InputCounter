@@ -33,6 +33,7 @@ public sealed class InputCounterForm : Form
     private static readonly bool DebugRewindKeywordTrigger = false;
     private const int MaxRenderedAuraParticles = 1000;
     private readonly Label totalLabel = new Label(), totalHighScoreLabel = new Label(), detailLabel = new Label(), highScoreLabel = new Label(), allTimeLabel = new Label();
+    private readonly EffectLabel comboLabel = new EffectLabel();
     private readonly Panel hudBackgroundPanel = new Panel();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
     private HookProc keyboardProc, mouseProc;
@@ -150,6 +151,7 @@ public sealed class InputCounterForm : Form
         detailLabel.BackColor = hudBackground; detailLabel.ForeColor = Color.FromArgb(163, 196, 255); detailLabel.Font = new Font("Segoe UI", 8F); detailLabel.Location = new Point(4, hudTop + 48); detailLabel.Size = new Size(HudWidth - 8, 15); detailLabel.TextAlign = ContentAlignment.MiddleCenter;
         highScoreLabel.BackColor = hudBackground; highScoreLabel.ForeColor = Color.FromArgb(163, 196, 255); highScoreLabel.Font = new Font("Segoe UI", 6.5F); highScoreLabel.Location = new Point(4, hudTop + 66); highScoreLabel.Size = new Size(HudWidth - 8, 13); highScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         allTimeLabel.BackColor = hudBackground; allTimeLabel.ForeColor = Color.FromArgb(205, 210, 220); allTimeLabel.Font = new Font("Segoe UI", 6.5F); allTimeLabel.Location = new Point(4, hudTop + 83); allTimeLabel.Size = new Size(HudWidth - 8, 13); allTimeLabel.TextAlign = ContentAlignment.MiddleCenter;
+        comboLabel.AutoSize = true; comboLabel.Visible = false; comboLabel.Font = new Font("Segoe UI Semibold", 8F); comboLabel.ForeColor = Color.FromArgb(150, 218, 255); comboLabel.BackColor = Color.Transparent;
         highScore = 0;
         totalCount = LoadTotalCount();
         lastInputCheckpoint = totalCount;
@@ -160,9 +162,9 @@ public sealed class InputCounterForm : Form
         activeElement = ResolveAutoElement();
         foreach (string eventName in InputEventNames) inputEventKeyPressCounts[eventName] = 0;
         foreach (string eventName in IdleEventNames) idleEventDecayedKeyCounts[eventName] = 0;
-        Controls.Add(hudBackgroundPanel); Controls.Add(totalLabel); Controls.Add(totalHighScoreLabel); Controls.Add(detailLabel); Controls.Add(highScoreLabel); Controls.Add(allTimeLabel); hudBackgroundPanel.SendToBack(); UpdateDisplay();
+        Controls.Add(hudBackgroundPanel); Controls.Add(totalLabel); Controls.Add(totalHighScoreLabel); Controls.Add(detailLabel); Controls.Add(highScoreLabel); Controls.Add(allTimeLabel); Controls.Add(comboLabel); hudBackgroundPanel.SendToBack(); UpdateDisplay();
         SyncAuraParticlesToScore();
-        MouseDown += WindowMouseDown; hudBackgroundPanel.MouseDown += WindowMouseDown; totalLabel.MouseDown += WindowMouseDown; totalHighScoreLabel.MouseDown += WindowMouseDown; detailLabel.MouseDown += WindowMouseDown; highScoreLabel.MouseDown += WindowMouseDown; allTimeLabel.MouseDown += WindowMouseDown;
+        MouseDown += WindowMouseDown; hudBackgroundPanel.MouseDown += WindowMouseDown; totalLabel.MouseDown += WindowMouseDown; totalHighScoreLabel.MouseDown += WindowMouseDown; detailLabel.MouseDown += WindowMouseDown; highScoreLabel.MouseDown += WindowMouseDown; allTimeLabel.MouseDown += WindowMouseDown; comboLabel.MouseDown += WindowMouseDown;
         totalBaseLocation = totalLabel.Location;
         rateTimer.Interval = 1000;
         rateTimer.Tick += delegate
@@ -265,6 +267,7 @@ public sealed class InputCounterForm : Form
         if (comboStreak == 0) comboOnePercentHits = 0;
         comboStreak++;
         lastComboKeyAt = now;
+        UpdateComboStreakIndicator();
     }
     private void ResolveComboCascadeIfExpired()
     {
@@ -276,7 +279,18 @@ public sealed class InputCounterForm : Form
         int resolvedStreak = comboStreak;
         comboStreak = 0;
         lastComboKeyAt = DateTime.MinValue;
+        comboLabel.Visible = false;
         ResolveComboCascade(resolvedStreak);
+    }
+    private void UpdateComboStreakIndicator()
+    {
+        // This is text only—not a bubble or a new HUD row—anchored directly
+        // above the Total so the live streak can be read while typing.
+        if (comboStreak < 2) { comboLabel.Visible = false; return; }
+        comboLabel.Text = "COMBO x" + comboStreak;
+        comboLabel.Location = new Point(totalBaseLocation.X + 5, hudTop - 16);
+        comboLabel.Visible = true;
+        comboLabel.BringToFront();
     }
     private void ResolveComboCascade(int streak)
     {
