@@ -1,2 +1,2 @@
 @echo off
-start "Input Counter" "%~dp0InputCounter-combo-cascade-sequence.exe"
+start "Input Counter" "%~dp0InputCounter-combo-stars.exe"

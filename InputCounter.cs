@@ -34,6 +34,7 @@ public sealed class InputCounterForm : Form
     // only enabled in the separate temporary demo executable.
     private static readonly bool DebugRewindKeywordTrigger = false;
     private const int MaxRenderedAuraParticles = 1000;
+    private const double ComboStarChancePercent = 0.01;
     private readonly Label totalLabel = new Label(), totalHighScoreLabel = new Label(), detailLabel = new Label(), highScoreLabel = new Label(), allTimeLabel = new Label();
     private readonly Panel hudBackgroundPanel = new Panel();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
@@ -74,6 +75,11 @@ public sealed class InputCounterForm : Form
     // the following +75 in the same paint frame.
     private readonly Queue<ComboCascadeVisual> queuedComboCascadeVisuals = new Queue<ComboCascadeVisual>();
     private DateTime activeComboVisualUntil = DateTime.MinValue;
+    private long comboStarCount;
+    private bool comboStarsDirty;
+    // This session starts at 0.01%; each natural Combo success raises it by
+    // another 0.01%. It intentionally has no hard cap.
+    private double comboStarChancePercent = ComboStarChancePercent;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -85,6 +91,7 @@ public sealed class InputCounterForm : Form
     private readonly string auraDiaryPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "typing-aura-diary.txt");
     private readonly string planetCollectionPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "planet-collection.txt");
     private readonly string planetHistoryPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "planet-history.txt");
+    private readonly string comboStarsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "combo-stars.txt");
     private int highScore;
     private long totalHighScore;
     private long allTimeTotal;
@@ -167,6 +174,7 @@ public sealed class InputCounterForm : Form
         lastInputCheckpoint = totalCount;
         totalHighScore = LoadTotalHighScore();
         allTimeTotal = LoadAllTimeTotal();
+        comboStarCount = LoadComboStars();
         auraDiary = LoadAuraDiary();
         LoadPlanetCollection();
         activeElement = ResolveAutoElement();
@@ -185,6 +193,7 @@ public sealed class InputCounterForm : Form
             if (allTimeDirty) SaveAllTimeTotal();
             if (totalDirty) SaveTotalCount();
             if (totalHighScoreDirty) SaveTotalHighScore();
+            if (comboStarsDirty) SaveComboStars();
             if (auraDiaryDirty) SaveAuraDiary();
             FlushLogs();
             UpdateDisplay();
@@ -363,6 +372,30 @@ public sealed class InputCounterForm : Form
             if (random.NextDouble() * 100.0 >= chance)
             {
                 StartComboFailureVisual(chance);
+                if (streak > 100 && chance < 50.0 && comboStarCount > 0)
+                {
+                    // A STAR rescues this one failed roll only. The failed
+                    // lilac percentage remains visible first, then the
+                    // rescued yellow percentage/bonus gets its own turn.
+                    comboStarCount--;
+                    comboStarsDirty = true;
+                    long rescueBefore = totalCount;
+                    totalCount += bonus;
+                    totalDirty = true;
+                    int rescueAuraCountBeforeBonus = auraParticles.Count;
+                    Color rescueColour = Color.FromArgb(255, 232, 72);
+                    SyncAuraParticlesToScore(rescueColour);
+                    RefreshIncomingAuraParticles(rescueAuraCountBeforeBonus, bonus, rescueColour);
+                    bool rescuedOnePercent = chance <= 1.0;
+                    if (rescuedOnePercent) comboOnePercentHits++;
+                    bool rescueBloom = rescuedOnePercent && comboOnePercentHits >= 3;
+                    QueueComboCascadeVisual(bonus, chance, rescueBloom, true, true);
+                    LogChange("COMBO_STAR_RESCUE", bonus, rescueBefore, totalCount, recentInputs.Count, bonus, null);
+                    if (rescueBloom) { ApplyComboCoreBloomReward(); comboOnePercentHits = 0; }
+                    bonus = Math.Max(1, (int)Math.Floor(bonus * 0.75));
+                    chance = Math.Min(100.0, (double)bonus);
+                    continue;
+                }
                 break;
             }
             long before = totalCount;
@@ -375,6 +408,7 @@ public sealed class InputCounterForm : Form
             if (isOnePercent) comboOnePercentHits++;
             bool coreBloom = isOnePercent && comboOnePercentHits >= 3;
             StartComboCascadeVisual(bonus, chance, coreBloom);
+            comboStarChancePercent += ComboStarChancePercent;
             LogChange("COMBO_CASCADE", bonus, before, totalCount, recentInputs.Count, bonus, null);
             if (coreBloom)
             {
@@ -443,6 +477,7 @@ public sealed class InputCounterForm : Form
         EnsureDailyTotal();
         EnsurePlanetCollectionDate();
         TryPlanetGacha();
+        TryAwardComboStar();
         DateTime now = DateTime.UtcNow;
         DateTime cutoff = now.AddSeconds(-1);
         while (recentInputs.Count > 0 && recentInputs.Peek() < cutoff) recentInputs.Dequeue();
@@ -470,6 +505,15 @@ public sealed class InputCounterForm : Form
         StartIncreaseAnimation(multiplier);
         LogChange(multiplier > 1 ? "INPUT_CRITICAL" : "INPUT_NORMAL", multiplier, totalCount - multiplier, totalCount, recentInputs.Count, multiplier, null);
         UpdateDisplay();
+    }
+    private void TryAwardComboStar()
+    {
+        if (random.NextDouble() * 100.0 >= comboStarChancePercent) return;
+        comboStarCount++;
+        comboStarsDirty = true;
+        // A collected STAR restarts the escalating drop chance for this
+        // session. STAR storage itself remains unlimited.
+        comboStarChancePercent = ComboStarChancePercent;
     }
     private void EnsurePlanetCollectionDate()
     {
@@ -721,7 +765,11 @@ public sealed class InputCounterForm : Form
     }
     private void QueueComboCascadeVisual(long bonus, double chancePercent, bool coreBloom, bool succeeded)
     {
-        queuedComboCascadeVisuals.Enqueue(new ComboCascadeVisual { Bonus = bonus, ChancePercent = chancePercent, CoreBloom = coreBloom, Succeeded = succeeded });
+        QueueComboCascadeVisual(bonus, chancePercent, coreBloom, succeeded, false);
+    }
+    private void QueueComboCascadeVisual(long bonus, double chancePercent, bool coreBloom, bool succeeded, bool starRescue)
+    {
+        queuedComboCascadeVisuals.Enqueue(new ComboCascadeVisual { Bonus = bonus, ChancePercent = chancePercent, CoreBloom = coreBloom, Succeeded = succeeded, StarRescue = starRescue });
         totalAnimationTimer.Start();
     }
     private bool HasQueuedComboCascadeVisual()
@@ -741,7 +789,7 @@ public sealed class InputCounterForm : Form
         decreaseAnimationFrames = 0;
         totalLabel.Location = totalBaseLocation;
         comboFlashFrames = Math.Max(comboFlashFrames, step.CoreBloom ? 82 : step.Succeeded ? 24 : 0);
-        SpawnComboChanceEffect(step.Bonus, step.ChancePercent, step.CoreBloom, step.Succeeded);
+        SpawnComboChanceEffect(step.Bonus, step.ChancePercent, step.CoreBloom, step.Succeeded, step.StarRescue);
         if (step.Succeeded) TriggerComboCoreExplosion(step.ChancePercent, step.CoreBloom);
         // Each outcome has its own readable turn. The final failed percentage
         // stays slightly longer, then the speech bubble can resume.
@@ -749,9 +797,13 @@ public sealed class InputCounterForm : Form
     }
     private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom)
     {
-        SpawnComboChanceEffect(bonus, chancePercent, coreBloom, true);
+        SpawnComboChanceEffect(bonus, chancePercent, coreBloom, true, false);
     }
     private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom, bool succeeded)
+    {
+        SpawnComboChanceEffect(bonus, chancePercent, coreBloom, succeeded, false);
+    }
+    private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom, bool succeeded, bool starRescue)
     {
         // The cascade owns one reserved visual slot. It replaces the streak
         // text and replaces its own prior step, so no Combo strings overlap.
@@ -760,6 +812,7 @@ public sealed class InputCounterForm : Form
         FloatingEffect effect = new FloatingEffect();
         effect.Increasing = true; effect.Critical = true; effect.FrontControl = true;
         effect.ComboFailed = !succeeded;
+        effect.ComboStarRescue = starRescue;
         effect.X = totalBaseLocation.X + totalLabel.Width - 9;
         effect.Y = totalBaseLocation.Y + random.Next(2, 18);
         double angle = (-150.0 + random.NextDouble() * 120.0) * Math.PI / 180.0;
@@ -769,7 +822,7 @@ public sealed class InputCounterForm : Form
         effect.Life = effect.MaxLife = coreBloom ? 205 : succeeded ? 150 : 105;
         // Failed chance uses lilac: clearly distinct from blue success and
         // red decay, while remaining visible on a dark desktop.
-        effect.CriticalColor = coreBloom ? Color.White : succeeded ? ComboAuraColor : Color.FromArgb(215, 165, 255);
+        effect.CriticalColor = starRescue ? Color.FromArgb(255, 232, 72) : coreBloom ? Color.White : succeeded ? ComboAuraColor : Color.FromArgb(215, 165, 255);
         // The successful probability is the dominant readable visual: direct
         // text over the HUD, with no label background, border, or bubble.
         string cascadeText = CompactChance(chancePercent) + "%" + (succeeded ? "  +" + bonus : String.Empty);
@@ -1053,7 +1106,7 @@ public sealed class InputCounterForm : Form
             if (effect.ComboCascade && !effect.ComboFailed)
             {
                 double shimmer = 0.5 + 0.5 * Math.Sin((effect.MaxLife - effect.Life) * 0.34);
-                target = Blend(ComboAuraColor, Color.White, shimmer);
+                target = effect.ComboStarRescue ? Blend(Color.FromArgb(255, 232, 72), Color.White, shimmer) : Blend(ComboAuraColor, Color.White, shimmer);
             }
             effect.Label.ForeColor = Blend(BackColor, target, visibility);
             if (effect.Critical && !effect.Rewind && !effect.ComboCascade)
@@ -1628,11 +1681,28 @@ public sealed class InputCounterForm : Form
         using (SolidBrush coreBrush = new SolidBrush(coreTint)) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
         using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
+        DrawComboStars(graphics, core, radius);
         // Wind is intentionally drawn over the particle cloud so rapid input
         // remains clearly readable instead of disappearing behind 1,000 dots.
         DrawSpeedWind(graphics, core, radius);
         DrawOwnedPlanets(graphics, core);
         graphics.SmoothingMode = oldSmoothing;
+    }
+    private void DrawComboStars(Graphics graphics, PointF core, float coreRadius)
+    {
+        // There is deliberately no collection cap. Each stored STAR has a
+        // stable, individual orbit derived from its index and moves with the
+        // same living Aura phase as the surrounding particles.
+        for (long index = 0; index < comboStarCount; index++)
+        {
+            double seed = index * 2.399963229728653; // golden-angle spacing
+            double angle = seed + auraPhase * (0.42 + (index % 7) * 0.037);
+            float orbit = coreRadius + 18F + (index % 19) * 3.1F;
+            float x = core.X + (float)Math.Cos(angle) * orbit;
+            float y = core.Y + (float)Math.Sin(angle) * orbit * (0.56F + (index % 5) * 0.045F);
+            Color colour = (index % 3 == 0) ? Color.White : Color.FromArgb(255, 232, 72);
+            DrawAuraStar(graphics, x, y, 1.45F + (index % 4) * 0.18F, colour);
+        }
     }
     private void DrawComboCoreExplosion(Graphics graphics, PointF core, float coreRadius)
     {
@@ -1895,6 +1965,7 @@ public sealed class InputCounterForm : Form
         internal double ChancePercent;
         internal bool CoreBloom;
         internal bool Succeeded;
+        internal bool StarRescue;
     }
     private enum ElementStyle
     {
@@ -1917,7 +1988,7 @@ public sealed class InputCounterForm : Form
         internal Label Label;
         internal float X, Y, VelocityX, VelocityY, Life, MaxLife;
         internal bool Increasing;
-        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak, ComboCascade, ComboFailed;
+        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak, ComboCascade, ComboFailed, ComboStarRescue;
         internal int Multiplier;
         internal Color CriticalColor;
     }
@@ -2090,6 +2161,26 @@ public sealed class InputCounterForm : Form
         try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(allTimePath)); System.IO.File.WriteAllText(allTimePath, allTimeTotal.ToString()); allTimeDirty = false; }
         catch { }
     }
+    private long LoadComboStars()
+    {
+        try
+        {
+            long saved;
+            if (long.TryParse(System.IO.File.ReadAllText(comboStarsPath), out saved)) return Math.Max(0, saved);
+        }
+        catch { }
+        return 0;
+    }
+    private void SaveComboStars()
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(comboStarsPath));
+            System.IO.File.WriteAllText(comboStarsPath, comboStarCount.ToString());
+            comboStarsDirty = false;
+        }
+        catch { }
+    }
     private AuraDiary LoadAuraDiary()
     {
         AuraDiary diary = new AuraDiary();
@@ -2164,7 +2255,7 @@ public sealed class InputCounterForm : Form
             if (!hudBackgroundPanel.Bounds.Contains(point)) m.Result = (IntPtr)HTTRANSPARENT;
         }
     }
-    protected override void OnFormClosed(FormClosedEventArgs e) { trayIcon.Visible = false; trayIcon.Dispose(); audioPeakMonitor.Dispose(); if (effectOverlayWindow != null && !effectOverlayWindow.IsDisposed) effectOverlayWindow.Close(); if (auraWindow != null && !auraWindow.IsDisposed) auraWindow.Close(); EnsureDailyTotal(); EnsurePlanetCollectionDate(); SavePlanetCollection(); if (allTimeDirty) SaveAllTimeTotal(); if (totalDirty) SaveTotalCount(); if (totalHighScoreDirty) SaveTotalHighScore(); CommitAuraDiary(); FlushLogs(); shakeTimer.Stop(); totalAnimationTimer.Stop(); auraTimer.Stop(); bubbleTimer.Stop(); if (keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(keyboardHook); if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook); base.OnFormClosed(e); }
+    protected override void OnFormClosed(FormClosedEventArgs e) { trayIcon.Visible = false; trayIcon.Dispose(); audioPeakMonitor.Dispose(); if (effectOverlayWindow != null && !effectOverlayWindow.IsDisposed) effectOverlayWindow.Close(); if (auraWindow != null && !auraWindow.IsDisposed) auraWindow.Close(); EnsureDailyTotal(); EnsurePlanetCollectionDate(); SavePlanetCollection(); if (allTimeDirty) SaveAllTimeTotal(); if (totalDirty) SaveTotalCount(); if (totalHighScoreDirty) SaveTotalHighScore(); if (comboStarsDirty) SaveComboStars(); CommitAuraDiary(); FlushLogs(); shakeTimer.Stop(); totalAnimationTimer.Stop(); auraTimer.Stop(); bubbleTimer.Stop(); if (keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(keyboardHook); if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook); base.OnFormClosed(e); }
     [STAThread] public static void Main() { Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new InputCounterForm()); }
 }
 
