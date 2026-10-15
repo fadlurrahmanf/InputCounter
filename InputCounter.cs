@@ -34,7 +34,7 @@ public sealed class InputCounterForm : Form
     // only enabled in the separate temporary demo executable.
     private static readonly bool DebugRewindKeywordTrigger = false;
     private const int MaxRenderedAuraParticles = 1000;
-    private readonly Label totalLabel = new Label(), totalHighScoreLabel = new Label(), detailLabel = new Label(), highScoreLabel = new Label(), allTimeLabel = new Label();
+    private readonly Label totalLabel = new Label(), totalHighScoreLabel = new Label(), detailLabel = new Label(), highScoreLabel = new Label(), allTimeLabel = new Label(), starCountLabel = new Label();
     private readonly Panel hudBackgroundPanel = new Panel();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
     private HookProc keyboardProc, mouseProc;
@@ -105,6 +105,30 @@ public sealed class InputCounterForm : Form
     private readonly string planetCollectionPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "planet-collection.txt");
     private readonly string planetHistoryPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "planet-history.txt");
     private readonly string comboStarsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "InputCounter", "combo-stars.txt");
+    // One human-readable file for live monitoring and tuning in VS Code. It
+    // remains separate from score persistence, so parameter edits are safe.
+    private readonly string auraParametersPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AuraCode", "aura-parameters.md");
+    private DateTime auraParametersLastWriteUtc = DateTime.MinValue;
+    private double starInitialChancePercent = 0.01;
+    private double starIncrementPercent = 0.01;
+    private double starChainChancePercent = 50.0;
+    private double zeroGravityChancePercent = 0.2;
+    private int zeroGravityDurationMilliseconds = 2000;
+    private double auraFlickerChancePercent = 10.0;
+    private int auraFlickerParticlePercent = 20;
+    private int auraFlickerDurationMilliseconds = 400;
+    private double gravityDipChancePercent = 5.0;
+    private int gravityDipDurationMilliseconds = 600;
+    private double auraBreathChancePercent = 12.0;
+    private int auraBreathDurationMilliseconds = 500;
+    private double auraBreathScalePercent = 10.0;
+    private double orbitWaveChancePercent = 8.0;
+    private int orbitWaveDurationMilliseconds = 760;
+    private double balancedSparkChancePercent = 1.0;
+    private int balancedSparkDurationMilliseconds = 5000;
+    private int balancedSparkBurstDurationMilliseconds = 650;
+    private double starLastRollChancePercent;
+    private string starLastRollResult = "not rolled this session";
     private int highScore;
     private long totalHighScore;
     private long allTimeTotal;
@@ -142,7 +166,7 @@ public sealed class InputCounterForm : Form
     private long sessionInputCount;
     private int sessionCriticalCount;
     private static readonly string[] InputEventNames = { "CRIT +2", "CRIT +3", "CRIT +4", "CRIT +5" };
-    private static readonly string[] IdleEventNames = { "REWIND", "ECHO +1", "ECHO +3", "ECHO +10", "ECHO +20", "DECAY -2", "DECAY -3", "DECAY -5" };
+    private static readonly string[] IdleEventNames = { "REWIND", "DECAY -2", "DECAY -3", "DECAY -5" };
     private readonly Dictionary<string, long> inputEventKeyPressCounts = new Dictionary<string, long>();
     private readonly Dictionary<string, long> idleEventDecayedKeyCounts = new Dictionary<string, long>();
     private string bubbleText = "Core ready";
@@ -181,26 +205,29 @@ public sealed class InputCounterForm : Form
         totalHighScoreLabel.BackColor = hudBackground; totalHighScoreLabel.ForeColor = Color.FromArgb(205, 210, 220); totalHighScoreLabel.Font = new Font("Segoe UI", 6.5F); totalHighScoreLabel.Location = new Point(4, hudTop + 35); totalHighScoreLabel.Size = new Size(HudWidth - 8, 11); totalHighScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         detailLabel.BackColor = hudBackground; detailLabel.ForeColor = Color.FromArgb(163, 196, 255); detailLabel.Font = new Font("Segoe UI", 8F); detailLabel.Location = new Point(4, hudTop + 48); detailLabel.Size = new Size(HudWidth - 8, 15); detailLabel.TextAlign = ContentAlignment.MiddleCenter;
         highScoreLabel.BackColor = hudBackground; highScoreLabel.ForeColor = Color.FromArgb(163, 196, 255); highScoreLabel.Font = new Font("Segoe UI", 6.5F); highScoreLabel.Location = new Point(4, hudTop + 66); highScoreLabel.Size = new Size(HudWidth - 8, 13); highScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
-        allTimeLabel.BackColor = hudBackground; allTimeLabel.ForeColor = Color.FromArgb(205, 210, 220); allTimeLabel.Font = new Font("Segoe UI", 6.5F); allTimeLabel.Location = new Point(4, hudTop + 83); allTimeLabel.Size = new Size(HudWidth - 8, 13); allTimeLabel.TextAlign = ContentAlignment.MiddleCenter;
+        allTimeLabel.BackColor = hudBackground; allTimeLabel.ForeColor = Color.FromArgb(205, 210, 220); allTimeLabel.Font = new Font("Segoe UI", 6.2F); allTimeLabel.Location = new Point(4, hudTop + 83); allTimeLabel.Size = new Size(106, 13); allTimeLabel.TextAlign = ContentAlignment.MiddleLeft;
+        starCountLabel.BackColor = hudBackground; starCountLabel.ForeColor = Color.FromArgb(255, 232, 92); starCountLabel.Font = new Font("Segoe UI Semibold", 6.5F); starCountLabel.Location = new Point(108, hudTop + 83); starCountLabel.Size = new Size(HudWidth - 112, 13); starCountLabel.TextAlign = ContentAlignment.MiddleRight;
         highScore = 0;
         totalCount = LoadTotalCount();
         lastInputCheckpoint = totalCount;
         totalHighScore = LoadTotalHighScore();
         allTimeTotal = LoadAllTimeTotal();
         LoadComboStars();
+        InitializeAuraParametersFile();
         auraDiary = LoadAuraDiary();
         LoadPlanetCollection();
         activeElement = ResolveAutoElement();
         foreach (string eventName in InputEventNames) inputEventKeyPressCounts[eventName] = 0;
         foreach (string eventName in IdleEventNames) idleEventDecayedKeyCounts[eventName] = 0;
-        Controls.Add(hudBackgroundPanel); Controls.Add(totalLabel); Controls.Add(totalHighScoreLabel); Controls.Add(detailLabel); Controls.Add(highScoreLabel); Controls.Add(allTimeLabel); hudBackgroundPanel.SendToBack(); UpdateDisplay();
+        Controls.Add(hudBackgroundPanel); Controls.Add(totalLabel); Controls.Add(totalHighScoreLabel); Controls.Add(detailLabel); Controls.Add(highScoreLabel); Controls.Add(allTimeLabel); Controls.Add(starCountLabel); hudBackgroundPanel.SendToBack(); UpdateDisplay();
         SyncAuraParticlesToScore();
-        MouseDown += WindowMouseDown; hudBackgroundPanel.MouseDown += WindowMouseDown; totalLabel.MouseDown += WindowMouseDown; totalHighScoreLabel.MouseDown += WindowMouseDown; detailLabel.MouseDown += WindowMouseDown; highScoreLabel.MouseDown += WindowMouseDown; allTimeLabel.MouseDown += WindowMouseDown;
+        MouseDown += WindowMouseDown; hudBackgroundPanel.MouseDown += WindowMouseDown; totalLabel.MouseDown += WindowMouseDown; totalHighScoreLabel.MouseDown += WindowMouseDown; detailLabel.MouseDown += WindowMouseDown; highScoreLabel.MouseDown += WindowMouseDown; allTimeLabel.MouseDown += WindowMouseDown; starCountLabel.MouseDown += WindowMouseDown;
         totalBaseLocation = totalLabel.Location;
         rateTimer.Interval = 1000;
         rateTimer.Tick += delegate
         {
             EnsurePlanetCollectionDate();
+            RefreshAuraParametersFromFile();
             ResolveComboCascadeIfExpired();
             if (!EnsureDailyTotal() && DateTime.UtcNow - lastInputAt >= TimeSpan.FromSeconds(3)) RunIdleChance();
             if (allTimeDirty) SaveAllTimeTotal();
@@ -208,6 +235,7 @@ public sealed class InputCounterForm : Form
             if (totalHighScoreDirty) SaveTotalHighScore();
             if (comboStarsDirty) SaveComboStars();
             if (auraDiaryDirty) SaveAuraDiary();
+            WriteAuraParametersFile();
             FlushLogs();
             UpdateDisplay();
         };
@@ -334,7 +362,7 @@ public sealed class InputCounterForm : Form
         if (activeComboStreakEffect == null || !floatingEffects.Contains(activeComboStreakEffect))
         {
             activeComboStreakEffect = new FloatingEffect();
-            activeComboStreakEffect.Increasing = true; activeComboStreakEffect.EchoCascade = true; activeComboStreakEffect.FrontControl = true;
+            activeComboStreakEffect.Increasing = true; activeComboStreakEffect.FrontControl = true;
             activeComboStreakEffect.CriticalColor = Color.FromArgb(150, 218, 255);
             activeComboStreakEffect.ComboStreak = true;
             activeComboStreakEffect.Label = new EffectLabel { AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", 9.5F), ForeColor = Color.FromArgb(150, 218, 255) };
@@ -527,19 +555,22 @@ public sealed class InputCounterForm : Form
         // The chance intentionally has no maximum cap. After enough misses it
         // exceeds 100%, making that later roll certain while still preserving
         // the exact +0.01 percentage-point progression requested by the user.
-        double currentStarChancePercent = 0.01 * (comboStarFailureCount + 1);
+        double currentStarChancePercent = starInitialChancePercent + starIncrementPercent * comboStarFailureCount;
+        starLastRollChancePercent = currentStarChancePercent;
         if (random.NextDouble() * 100.0 >= currentStarChancePercent)
         {
             comboStarFailureCount++;
             comboStarsDirty = true;
+            starLastRollResult = "miss";
             return;
         }
 
         comboStarFailureCount = 0;
+        starLastRollResult = "drop";
         AwardComboStar();
         // Once the progressive first drop succeeds, each extra STAR rolls 50%
         // until the first miss. There is intentionally no collection or chain cap.
-        while (random.NextDouble() < 0.50) AwardComboStar();
+        while (random.NextDouble() * 100.0 < starChainChancePercent) AwardComboStar();
     }
     private void AwardComboStar()
     {
@@ -627,9 +658,11 @@ public sealed class InputCounterForm : Form
         // Zero Gravity cancels idle decay only for its two-second visual pause.
         if (DateTime.UtcNow < zeroGravityUntil) return;
         long before = totalCount;
-        // Rewind is a separate 0.001% idle roll so all existing decay/Echo
-        // probabilities retain their own distribution.
-        if (!rewindCooldownActive && random.NextDouble() < 0.00001)
+        // Rewind remains a separate 0.001% idle roll. The conditional Decay
+        // thresholds below compensate for it so each special Decay still has
+        // its exact requested chance per idle roll.
+        bool rewindEligible = !rewindCooldownActive;
+        if (rewindEligible && random.NextDouble() < 0.00001)
         {
             RecordDecayedKeys(Math.Max(0, before - lastInputCheckpoint));
             long doubled = before < 0 ? 0 : before > long.MaxValue / 2 ? long.MaxValue : before * 2;
@@ -653,64 +686,41 @@ public sealed class InputCounterForm : Form
             UpdateDisplay();
             return;
         }
-        double roll = random.NextDouble() * 100.0;
+        const double rewindProbability = 0.00001;
+        double roll = random.NextDouble();
+        // Exact unconditional per-idle-roll probabilities: 0.15%, 0.05%, 0.02%.
+        double remainingAfterRewind = rewindEligible ? 1.0 - rewindProbability : 1.0;
+        double decayTwoThreshold = 0.0015 / remainingAfterRewind;
+        double decayThreeThreshold = (0.0015 + 0.0005) / remainingAfterRewind;
+        double decayFiveThreshold = (0.0015 + 0.0005 + 0.0002) / remainingAfterRewind;
         int delta;
-        string eventName;
         double chancePercent;
-        if (roll < 97.22) { delta = -1; chancePercent = 97.22; }
-        else if (roll < 98.47) { delta = -2; chancePercent = 1.25; }
-        else if (roll < 98.97) { delta = -3; chancePercent = 0.5; }
-        else if (roll < 99.17) { delta = -5; chancePercent = 0.2; }
-        else if (roll < 99.67) { delta = 1; chancePercent = 0.5; }
-        else if (roll < 99.87) { delta = 3; chancePercent = 0.2; }
-        else if (roll < 99.97) { delta = 10; chancePercent = 0.1; }
-        else { delta = 20; chancePercent = 0.03; }
-        // A normal -1 remains reliable once per idle second. Only rare Decay
-        // and Echo candidates can fall back to that normal decay.
-        if (delta > 0 && random.NextDouble() >= 0.5) { delta = -1; chancePercent = 100.0; }
-        else if (delta < -1 && random.NextDouble() >= 0.25) { delta = -1; chancePercent = 100.0; }
-        if (delta == -1) chancePercent = 100.0;
-        else if (delta == -2) chancePercent = 0.3125;
-        else if (delta == -3) chancePercent = 0.125;
-        else if (delta == -5) chancePercent = 0.05;
-        else if (delta == 1) chancePercent = 0.25;
-        else if (delta == 3) chancePercent = 0.1;
-        else if (delta == 10) chancePercent = 0.05;
-        else if (delta == 20) chancePercent = 0.015;
-        if (delta < 0) RecordDecayedKeys(-delta);
-        // Normal -1 decay stays deliberately quiet; only special decay values
-        // and every Echo use the event bubble.
-        if ((delta < -1) || delta > 0)
-        {
-            if (delta < 0) ShowRareEventBubble("DECAY " + delta, chancePercent, false);
-            else ShowRareEventBubble("ECHO +" + delta, chancePercent, false);
-        }
+        if (roll < decayTwoThreshold) { delta = -2; chancePercent = 0.15; }
+        else if (roll < decayThreeThreshold) { delta = -3; chancePercent = 0.05; }
+        else if (roll < decayFiveThreshold) { delta = -5; chancePercent = 0.02; }
+        else { delta = -1; chancePercent = 100.0; }
+        RecordDecayedKeys(-delta);
+        // Normal -1 remains quiet; only special Decay uses the rare-event bubble.
+        if (delta < -1) ShowRareEventBubble("DECAY " + delta, chancePercent, false);
         totalCount += delta;
         totalDirty = true;
         if (delta < -1) ActivateDecayAuraRedEffect();
-        int auraCountBeforeIdleEvent = auraParticles.Count;
-        Color? echoArrivalColor = delta > 0 ? (Color?)ScoreBonusAuraColor : null;
-        SyncAuraParticlesToScore(echoArrivalColor);
-        if (delta > 0) RefreshIncomingAuraParticles(auraCountBeforeIdleEvent, delta, echoArrivalColor);
-        if (delta < 0)
-        {
-            TriggerNegativeAuraEffects(delta == -1);
-            eventName = delta == -1 ? "DECAY_NORMAL" : "DECAY_CRITICAL";
-            if (rewindGreenActive) { rewindDecayDebt += -delta; if (rewindDecayDebt >= 100) { rewindGreenActive = false; rewindCooldownActive = false; } }
-            StartDecreaseAnimation(delta == -1, delta < -1);
-        }
-        else { TriggerPositiveAuraEffects(); eventName = "ECHO_CASCADE"; StartEchoCascadeAnimation(delta); }
+        SyncAuraParticlesToScore();
+        TriggerNegativeAuraEffects(delta == -1);
+        string eventName = delta == -1 ? "DECAY_NORMAL" : "DECAY_CRITICAL";
+        if (rewindGreenActive) { rewindDecayDebt += -delta; if (rewindDecayDebt >= 100) { rewindGreenActive = false; rewindCooldownActive = false; } }
+        StartDecreaseAnimation(delta == -1, delta < -1);
         LogChange(eventName, delta, before, totalCount, recentInputs.Count, delta, null);
     }
     private void TriggerPositiveAuraEffects()
     {
         DateTime now = DateTime.UtcNow;
         // Aura Breath: +12%, Core and surrounding particles swell by 10%.
-        if (now >= auraBreathUntil && random.NextDouble() < 0.12)
-            auraBreathUntil = now.AddMilliseconds(500);
+        if (now >= auraBreathUntil && random.NextDouble() * 100.0 < auraBreathChancePercent)
+            auraBreathUntil = now.AddMilliseconds(auraBreathDurationMilliseconds);
         // Orbit Wave: +8%, an expanding dotted blue-white ripple.
-        if (now >= orbitWaveUntil && random.NextDouble() < 0.08)
-            orbitWaveUntil = now.AddMilliseconds(760);
+        if (now >= orbitWaveUntil && random.NextDouble() * 100.0 < orbitWaveChancePercent)
+            orbitWaveUntil = now.AddMilliseconds(orbitWaveDurationMilliseconds);
         TriggerBalancedSpark(1, now);
     }
     private void TriggerNegativeAuraEffects(bool normalMinusOne)
@@ -718,17 +728,17 @@ public sealed class InputCounterForm : Form
         DateTime now = DateTime.UtcNow;
         // Zero Gravity and Aura Flicker are deliberately tied to the quiet
         // normal -1 decay, keeping special Decay event behavior untouched.
-        if (normalMinusOne && random.NextDouble() < 0.002)
-            zeroGravityUntil = now.AddSeconds(2);
-        if (normalMinusOne && random.NextDouble() < 0.10)
+        if (normalMinusOne && random.NextDouble() * 100.0 < zeroGravityChancePercent)
+            zeroGravityUntil = now.AddMilliseconds(zeroGravityDurationMilliseconds);
+        if (normalMinusOne && random.NextDouble() * 100.0 < auraFlickerChancePercent)
         {
-            auraFlickerUntil = now.AddMilliseconds(400);
+            auraFlickerUntil = now.AddMilliseconds(auraFlickerDurationMilliseconds);
             foreach (AuraParticle particle in auraParticles)
-                particle.AuraFlickerTarget = random.NextDouble() < 0.20;
+                particle.AuraFlickerTarget = random.NextDouble() * 100.0 < auraFlickerParticlePercent;
         }
         // Gravity Dip: -5%, a compact pull toward the Core for 0.6 seconds.
-        if (now >= gravityDipUntil && random.NextDouble() < 0.05)
-            gravityDipUntil = now.AddMilliseconds(600);
+        if (now >= gravityDipUntil && random.NextDouble() * 100.0 < gravityDipChancePercent)
+            gravityDipUntil = now.AddMilliseconds(gravityDipDurationMilliseconds);
         TriggerBalancedSpark(-1, now);
     }
     private void TriggerBalancedSpark(int scoreSign, DateTime now)
@@ -737,16 +747,16 @@ public sealed class InputCounterForm : Form
         // five-second life makes the spark break softly without score impact.
         if (balancedSparkSign != 0 && now < balancedSparkUntil && balancedSparkSign != scoreSign)
         {
-            balancedSparkBurstUntil = now.AddMilliseconds(650);
+            balancedSparkBurstUntil = now.AddMilliseconds(balancedSparkBurstDurationMilliseconds);
             balancedSparkUntil = now;
             balancedSparkSign = 0;
             return;
         }
-        if (balancedSparkSign == 0 && random.NextDouble() < 0.01)
+        if (balancedSparkSign == 0 && random.NextDouble() * 100.0 < balancedSparkChancePercent)
         {
             balancedSparkSign = scoreSign;
             balancedSparkAngle = random.NextDouble() * Math.PI * 2.0;
-            balancedSparkUntil = now.AddSeconds(5);
+            balancedSparkUntil = now.AddMilliseconds(balancedSparkDurationMilliseconds);
         }
     }
     private void LogChange(string eventName, long delta, long before, long after, int keyPerSecond, int multiplier, long? checkpoint)
@@ -779,6 +789,7 @@ public sealed class InputCounterForm : Form
         detailLabel.Text = keysPerSecond.ToString("N0") + " key/sec";
         highScoreLabel.Text = "Highscore: " + highScore.ToString("N0") + " key/sec";
         allTimeLabel.Text = "All time: " + allTimeTotal.ToString("N0") + " key";
+        starCountLabel.Text = "✰:" + comboStarCount.ToString("N0");
         ApplySpeedEffects(keysPerSecond);
     }
     private void ApplySpeedEffects(int keysPerSecond)
@@ -827,14 +838,6 @@ public sealed class InputCounterForm : Form
         increaseAnimationFrames = 0;
         SpawnParticles(false, specialEvent, 3, false);
         if (showFloatingNumber) SpawnFloatingEffect(false);
-        totalAnimationTimer.Start();
-    }
-    private void StartEchoCascadeAnimation(int delta)
-    {
-        increaseAnimationFrames = 7;
-        decreaseAnimationFrames = 0;
-        SpawnParticles(true, true, Math.Min(20, Math.Max(1, delta)), false);
-        SpawnEchoCascadeEffect(delta);
         totalAnimationTimer.Start();
     }
     private void StartComboCascadeVisual(int bonus, double chancePercent, bool coreBloom)
@@ -1061,30 +1064,6 @@ public sealed class InputCounterForm : Form
         effect.Label = new EffectLabel { Text = increasing ? RandomIncreaseEffect(leftSide, direction) : "-1", AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", increasing ? 11F : 9F), ForeColor = increasing ? RandomEffectColor() : Color.FromArgb(135, 190, 255) };
         floatingEffects.Add(effect);
     }
-    private void SpawnEchoCascadeEffect(int delta)
-    {
-        FloatingEffect effect = new FloatingEffect();
-        effect.Increasing = true; effect.EchoCascade = true;
-        effect.X = totalBaseLocation.X + totalLabel.Width - 5;
-        effect.Y = totalBaseLocation.Y + random.Next(3, 18);
-        float horizontal = 1.0F, vertical = -1.15F;
-        switch (activeElement)
-        {
-            case ElementStyle.Water: horizontal = 0.55F; vertical = -0.65F; break;
-            case ElementStyle.Wind: horizontal = 2.05F; vertical = -0.18F; break;
-            case ElementStyle.Earth: horizontal = 0.28F; vertical = -0.88F; break;
-            case ElementStyle.Lightning: horizontal = 2.25F; vertical = -1.45F; break;
-            case ElementStyle.Ice: horizontal = 0.75F; vertical = -1.22F; break;
-            case ElementStyle.Nature: horizontal = 1.1F; vertical = -0.72F; break;
-            case ElementStyle.Shadow: horizontal = 0.42F; vertical = -0.5F; break;
-            case ElementStyle.Cosmic: horizontal = 1.3F; vertical = -1.0F; break;
-        }
-        effect.VelocityX = horizontal; effect.VelocityY = vertical;
-        effect.Life = effect.MaxLife = 160;
-        effect.CriticalColor = AuraStyleColor();
-        effect.Label = new EffectLabel { Text = "+" + delta, AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", 11F), ForeColor = effect.CriticalColor };
-        floatingEffects.Add(effect);
-    }
     private void SpawnCriticalEffect(int multiplier)
     {
         double angle = -Math.PI / 2 + random.NextDouble() * Math.PI / 2;
@@ -1186,7 +1165,7 @@ public sealed class InputCounterForm : Form
             // for its full duration instead of deleting it on a direction check.
             if (!effect.FrontControl && !effect.Rewind && HitsProtectedLabel(textBounds)) effect.Life = 0;
             double visibility = effect.Rewind && effect.Life > 18 ? 1.0 : effect.Rewind ? effect.Life / 18.0 : effect.Life / (double)effect.MaxLife;
-            Color target = effect.Critical || effect.Burst || effect.EchoCascade ? effect.CriticalColor : effect.Increasing ? Color.White : Color.FromArgb(135, 190, 255);
+            Color target = effect.Critical || effect.Burst ? effect.CriticalColor : effect.Increasing ? Color.White : Color.FromArgb(135, 190, 255);
             if (effect.ComboCascade && !effect.ComboFailed)
             {
                 double shimmer = 0.5 + 0.5 * Math.Sin((effect.MaxLife - effect.Life) * 0.34);
@@ -1211,7 +1190,7 @@ public sealed class InputCounterForm : Form
     }
     private bool HitsProtectedLabel(Rectangle effectBounds)
     {
-        return effectBounds.IntersectsWith(detailLabel.Bounds) || effectBounds.IntersectsWith(highScoreLabel.Bounds) || effectBounds.IntersectsWith(allTimeLabel.Bounds) || effectBounds.IntersectsWith(totalHighScoreLabel.Bounds) || effectBounds.Right >= ClientSize.Width || effectBounds.Left <= 0 || effectBounds.Top <= 0 || effectBounds.Bottom >= ClientSize.Height;
+        return effectBounds.IntersectsWith(detailLabel.Bounds) || effectBounds.IntersectsWith(highScoreLabel.Bounds) || effectBounds.IntersectsWith(allTimeLabel.Bounds) || effectBounds.IntersectsWith(starCountLabel.Bounds) || effectBounds.IntersectsWith(totalHighScoreLabel.Bounds) || effectBounds.Right >= ClientSize.Width || effectBounds.Left <= 0 || effectBounds.Top <= 0 || effectBounds.Bottom >= ClientSize.Height;
     }
     private string RandomIncreaseEffect(bool leftSide, int verticalDirection)
     {
@@ -1357,10 +1336,6 @@ public sealed class InputCounterForm : Form
         else if (eventName.StartsWith("DECAY"))
         {
             message.ColorA = Color.FromArgb(85, 245, 180); message.ColorB = Color.FromArgb(85, 175, 255);
-        }
-        else if (eventName.StartsWith("ECHO"))
-        {
-            message.ColorA = Color.FromArgb(238, 184, 112); message.ColorB = Color.FromArgb(255, 220, 171);
         }
         else
         {
@@ -1706,7 +1681,7 @@ public sealed class InputCounterForm : Form
                 float desiredY = core.Y + localX * tiltSin + localY * tiltCos;
                 if (DateTime.UtcNow < gravityDipUntil)
                 {
-                    double dipProgress = 1.0 - (gravityDipUntil - DateTime.UtcNow).TotalMilliseconds / 600.0;
+                    double dipProgress = 1.0 - (gravityDipUntil - DateTime.UtcNow).TotalMilliseconds / gravityDipDurationMilliseconds;
                     float pullToCore = 0.28F * (float)Math.Sin(Math.Max(0.0, Math.Min(1.0, dipProgress)) * Math.PI);
                     desiredX = core.X + (desiredX - core.X) * (1F - pullToCore);
                     desiredY = core.Y + (desiredY - core.Y) * (1F - pullToCore);
@@ -1744,7 +1719,7 @@ public sealed class InputCounterForm : Form
         PointF core = AuraCoreCenter();
         if (DateTime.UtcNow < zeroGravityUntil)
         {
-            double floatProgress = 1.0 - (zeroGravityUntil - DateTime.UtcNow).TotalMilliseconds / 2000.0;
+            double floatProgress = 1.0 - (zeroGravityUntil - DateTime.UtcNow).TotalMilliseconds / zeroGravityDurationMilliseconds;
             core.Y -= 2.8F + (float)Math.Sin(floatProgress * Math.PI * 2.0) * 2.2F;
         }
         double memory = AuraMemoryProgress();
@@ -1772,8 +1747,8 @@ public sealed class InputCounterForm : Form
         float auraBreathScale = 1F;
         if (DateTime.UtcNow < auraBreathUntil)
         {
-            double breathProgress = 1.0 - (auraBreathUntil - DateTime.UtcNow).TotalMilliseconds / 500.0;
-            auraBreathScale += 0.10F * (float)Math.Sin(Math.Max(0.0, Math.Min(1.0, breathProgress)) * Math.PI);
+            double breathProgress = 1.0 - (auraBreathUntil - DateTime.UtcNow).TotalMilliseconds / auraBreathDurationMilliseconds;
+            auraBreathScale += (float)(auraBreathScalePercent / 100.0) * (float)Math.Sin(Math.Max(0.0, Math.Min(1.0, breathProgress)) * Math.PI);
         }
         float radius = baseRadius * pulse * auraBreathScale;
 
@@ -2060,7 +2035,7 @@ public sealed class InputCounterForm : Form
     private void DrawOrbitWave(Graphics graphics, PointF core, float coreRadius)
     {
         if (DateTime.UtcNow >= orbitWaveUntil) return;
-        double progress = 1.0 - (orbitWaveUntil - DateTime.UtcNow).TotalMilliseconds / 760.0;
+        double progress = 1.0 - (orbitWaveUntil - DateTime.UtcNow).TotalMilliseconds / orbitWaveDurationMilliseconds;
         progress = Math.Max(0.0, Math.Min(1.0, progress));
         float orbit = coreRadius + 8F + (float)progress * 105F;
         int dotCount = 24;
@@ -2087,7 +2062,7 @@ public sealed class InputCounterForm : Form
             DrawAuraStar(graphics, x, y, 3.1F, Color.FromArgb(255, 238, 142));
         }
         if (now >= balancedSparkBurstUntil) return;
-        double burstProgress = 1.0 - (balancedSparkBurstUntil - now).TotalMilliseconds / 650.0;
+        double burstProgress = 1.0 - (balancedSparkBurstUntil - now).TotalMilliseconds / balancedSparkBurstDurationMilliseconds;
         for (int i = 0; i < 8; i++)
         {
             double angle = balancedSparkAngle + i * Math.PI * 2.0 / 8.0;
@@ -2213,7 +2188,7 @@ public sealed class InputCounterForm : Form
         internal Label Label;
         internal float X, Y, VelocityX, VelocityY, Life, MaxLife;
         internal bool Increasing;
-        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak, ComboCascade, ComboFailed, ComboStarRescue;
+        internal bool Critical, Burst, Rewind, FrontControl, ComboStreak, ComboCascade, ComboFailed, ComboStarRescue;
         internal int Multiplier;
         internal Color CriticalColor;
     }
@@ -2406,6 +2381,116 @@ public sealed class InputCounterForm : Form
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(comboStarsPath));
             System.IO.File.WriteAllText(comboStarsPath, comboStarCount + "|" + comboStarFailureCount);
             comboStarsDirty = false;
+        }
+        catch { }
+    }
+    private void InitializeAuraParametersFile()
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(auraParametersPath));
+            if (System.IO.File.Exists(auraParametersPath)) RefreshAuraParametersFromFile();
+            else WriteAuraParametersFile();
+        }
+        catch { }
+    }
+    private void RefreshAuraParametersFromFile()
+    {
+        try
+        {
+            if (!System.IO.File.Exists(auraParametersPath)) { WriteAuraParametersFile(); return; }
+            DateTime observedWrite = System.IO.File.GetLastWriteTimeUtc(auraParametersPath);
+            if (observedWrite <= auraParametersLastWriteUtc) return;
+            Dictionary<string, string> values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string line in System.IO.File.ReadAllLines(auraParametersPath))
+            {
+                int separator = line.IndexOf(':');
+                if (separator <= 0) continue;
+                string key = line.Substring(0, separator).Trim();
+                if (key.StartsWith("#")) continue;
+                values[key] = line.Substring(separator + 1).Trim();
+            }
+            starInitialChancePercent = ReadAuraDouble(values, "star_initial_chance_percent", starInitialChancePercent, 0.000001, 1000000.0);
+            starIncrementPercent = ReadAuraDouble(values, "star_increment_per_failure_percent", starIncrementPercent, 0.000001, 1000000.0);
+            starChainChancePercent = ReadAuraDouble(values, "star_chain_chance_percent", starChainChancePercent, 0.0, 100.0);
+            zeroGravityChancePercent = ReadAuraDouble(values, "zero_gravity_chance_percent", zeroGravityChancePercent, 0.0, 100.0);
+            zeroGravityDurationMilliseconds = ReadAuraInt(values, "zero_gravity_duration_ms", zeroGravityDurationMilliseconds, 50, 60000);
+            auraFlickerChancePercent = ReadAuraDouble(values, "aura_flicker_chance_percent", auraFlickerChancePercent, 0.0, 100.0);
+            auraFlickerParticlePercent = ReadAuraInt(values, "aura_flicker_particle_percent", auraFlickerParticlePercent, 0, 100);
+            auraFlickerDurationMilliseconds = ReadAuraInt(values, "aura_flicker_duration_ms", auraFlickerDurationMilliseconds, 50, 10000);
+            gravityDipChancePercent = ReadAuraDouble(values, "gravity_dip_chance_percent", gravityDipChancePercent, 0.0, 100.0);
+            gravityDipDurationMilliseconds = ReadAuraInt(values, "gravity_dip_duration_ms", gravityDipDurationMilliseconds, 50, 10000);
+            auraBreathChancePercent = ReadAuraDouble(values, "aura_breath_chance_percent", auraBreathChancePercent, 0.0, 100.0);
+            auraBreathDurationMilliseconds = ReadAuraInt(values, "aura_breath_duration_ms", auraBreathDurationMilliseconds, 50, 10000);
+            auraBreathScalePercent = ReadAuraDouble(values, "aura_breath_scale_percent", auraBreathScalePercent, 0.0, 100.0);
+            orbitWaveChancePercent = ReadAuraDouble(values, "orbit_wave_chance_percent", orbitWaveChancePercent, 0.0, 100.0);
+            orbitWaveDurationMilliseconds = ReadAuraInt(values, "orbit_wave_duration_ms", orbitWaveDurationMilliseconds, 50, 10000);
+            balancedSparkChancePercent = ReadAuraDouble(values, "balanced_spark_chance_percent", balancedSparkChancePercent, 0.0, 100.0);
+            balancedSparkDurationMilliseconds = ReadAuraInt(values, "balanced_spark_duration_ms", balancedSparkDurationMilliseconds, 50, 60000);
+            balancedSparkBurstDurationMilliseconds = ReadAuraInt(values, "balanced_spark_burst_duration_ms", balancedSparkBurstDurationMilliseconds, 50, 10000);
+            auraParametersLastWriteUtc = observedWrite;
+        }
+        catch { }
+    }
+    private static double ReadAuraDouble(Dictionary<string, string> values, string key, double fallback, double minimum, double maximum)
+    {
+        string text; double parsed;
+        if (!values.TryGetValue(key, out text)) return fallback;
+        if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out parsed) &&
+            !double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out parsed)) return fallback;
+        return Math.Max(minimum, Math.Min(maximum, parsed));
+    }
+    private static int ReadAuraInt(Dictionary<string, string> values, string key, int fallback, int minimum, int maximum)
+    {
+        return (int)Math.Round(ReadAuraDouble(values, key, fallback, minimum, maximum), MidpointRounding.AwayFromZero);
+    }
+    private void WriteAuraParametersFile()
+    {
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(auraParametersPath));
+            System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+            double nextStarChance = starInitialChancePercent + starIncrementPercent * comboStarFailureCount;
+            List<string> lines = new List<string>();
+            lines.Add("# Aura Code live parameters");
+            lines.Add("# Save edits in the Editable parameters section. Aura Code reloads them within one second.");
+            lines.Add("# The Live status section is generated by Aura Code every second.");
+            lines.Add("");
+            lines.Add("## Editable parameters");
+            lines.Add("star_initial_chance_percent: " + starInitialChancePercent.ToString("0.######", culture));
+            lines.Add("star_increment_per_failure_percent: " + starIncrementPercent.ToString("0.######", culture));
+            lines.Add("star_chain_chance_percent: " + starChainChancePercent.ToString("0.##", culture));
+            lines.Add("zero_gravity_chance_percent: " + zeroGravityChancePercent.ToString("0.##", culture));
+            lines.Add("zero_gravity_duration_ms: " + zeroGravityDurationMilliseconds);
+            lines.Add("aura_flicker_chance_percent: " + auraFlickerChancePercent.ToString("0.##", culture));
+            lines.Add("aura_flicker_particle_percent: " + auraFlickerParticlePercent);
+            lines.Add("aura_flicker_duration_ms: " + auraFlickerDurationMilliseconds);
+            lines.Add("gravity_dip_chance_percent: " + gravityDipChancePercent.ToString("0.##", culture));
+            lines.Add("gravity_dip_duration_ms: " + gravityDipDurationMilliseconds);
+            lines.Add("aura_breath_chance_percent: " + auraBreathChancePercent.ToString("0.##", culture));
+            lines.Add("aura_breath_duration_ms: " + auraBreathDurationMilliseconds);
+            lines.Add("aura_breath_scale_percent: " + auraBreathScalePercent.ToString("0.##", culture));
+            lines.Add("orbit_wave_chance_percent: " + orbitWaveChancePercent.ToString("0.##", culture));
+            lines.Add("orbit_wave_duration_ms: " + orbitWaveDurationMilliseconds);
+            lines.Add("balanced_spark_chance_percent: " + balancedSparkChancePercent.ToString("0.##", culture));
+            lines.Add("balanced_spark_duration_ms: " + balancedSparkDurationMilliseconds);
+            lines.Add("balanced_spark_burst_duration_ms: " + balancedSparkBurstDurationMilliseconds);
+            lines.Add("");
+            lines.Add("## Live status (read only)");
+            lines.Add("updated_local: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            lines.Add("star_count: " + comboStarCount);
+            lines.Add("star_failed_rolls_since_drop: " + comboStarFailureCount);
+            lines.Add("star_next_roll_chance_percent: " + nextStarChance.ToString("0.######", culture));
+            lines.Add("star_next_roll_progress_to_100_percent: " + nextStarChance.ToString("0.######", culture) + " / 100.00");
+            lines.Add("star_last_roll_chance_percent: " + starLastRollChancePercent.ToString("0.######", culture));
+            lines.Add("star_last_roll_result: " + starLastRollResult);
+            lines.Add("idle_decay_minus_2_chance_percent: 0.15");
+            lines.Add("idle_decay_minus_3_chance_percent: 0.05");
+            lines.Add("idle_decay_minus_5_chance_percent: 0.02");
+            lines.Add("zero_gravity_active: " + (DateTime.UtcNow < zeroGravityUntil).ToString().ToLowerInvariant());
+            lines.Add("balanced_spark_active: " + (DateTime.UtcNow < balancedSparkUntil).ToString().ToLowerInvariant());
+            System.IO.File.WriteAllLines(auraParametersPath, lines.ToArray());
+            auraParametersLastWriteUtc = System.IO.File.GetLastWriteTimeUtc(auraParametersPath);
         }
         catch { }
     }

@@ -6,7 +6,7 @@ Small, always-on-top Windows HUD that counts physical keyboard and mouse input w
 
 - Daily Total, High Total, All Time, current `key/sec`, and `key/sec` high score.
 - One physical key-down per press; held keys are counted once until released.
-- Idle decay after three seconds, Echo Cascade, Critical Hit, and rare Rewind events.
+- Idle decay after three seconds, Critical Hit, and rare Rewind events.
 - A transparent Typing Aura companion with a white Living Core, particle orbits, planets, and bidirectional wind at high typing speed.
 - Audio Aura reacts only to the current Windows speaker-output peak; it neither records nor stores audio.
 - Local-only persistence for scores, Aura diary, and daily planet collection. No key content is recorded or uploaded.
@@ -21,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `AuraCode-star-progressive-aura-effects.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `AuraCode-idle-decay-star-hud.exe`. Its live configuration dashboard is saved at `%LocalAppData%\\AuraCode\\aura-parameters.md` and reloads saved edits within one second. The executable and local score data are intentionally ignored by Git.

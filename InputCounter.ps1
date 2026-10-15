@@ -1,10 +1,10 @@
 #requires -Version 5.1
 
-$app = Join-Path $PSScriptRoot 'AuraCode-star-progressive-aura-effects.exe'
+$app = Join-Path $PSScriptRoot 'AuraCode-idle-decay-star-hud.exe'
 if (-not (Test-Path -LiteralPath $app)) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
-        'AuraCode-star-progressive-aura-effects.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
+        'AuraCode-idle-decay-star-hud.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
         'Aura Code',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
