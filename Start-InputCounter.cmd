@@ -1,2 +1,2 @@
 @echo off
-start "Input Counter" "%~dp0InputCounter-core-bottom-right.exe"
+start "Input Counter" "%~dp0InputCounter-audio-aura.exe"

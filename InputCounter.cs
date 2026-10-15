@@ -88,6 +88,12 @@ public sealed class InputCounterForm : Form
     private double auraSpeed;
     private double auraMass;
     private double auraPhase;
+    // Audio Aura samples only the instantaneous Windows render-endpoint peak.
+    // No audio frames, sound content, or recordings are retained.
+    private readonly AudioPeakMonitor audioPeakMonitor = new AudioPeakMonitor();
+    private float audioLevel;
+    private float audioBeat;
+    private double audioPhase;
     private ElementStyle activeElement = ElementStyle.Light;
     private int sessionPeakRate;
     private long sessionInputCount;
@@ -1170,6 +1176,14 @@ public sealed class InputCounterForm : Form
         while (recentInputs.Count > 0 && recentInputs.Peek() < cutoff) recentInputs.Dequeue();
         int keysPerSecond = recentInputs.Count;
         if (keysPerSecond > sessionPeakRate) sessionPeakRate = keysPerSecond;
+        float rawAudioPeak = audioPeakMonitor.GetPeak();
+        // Fast attack, slow release keeps the response musical instead of
+        // visibly vibrating on every individual sample.
+        float audioSmoothing = rawAudioPeak > audioLevel ? 0.36F : 0.075F;
+        audioLevel += (rawAudioPeak - audioLevel) * audioSmoothing;
+        float transient = Math.Max(0F, rawAudioPeak - audioLevel * 0.82F);
+        audioBeat = Math.Min(1F, audioBeat * 0.86F + transient * 1.65F);
+        audioPhase += 0.025 + audioLevel * 0.42 + audioBeat * 0.09;
         double targetSpeed = 1.0 - Math.Exp(-keysPerSecond / 7.0);
         double targetMass = 1.0 - Math.Exp(-Math.Log(1.0 + Math.Abs(totalCount)) / 5.0);
         if (totalCount < 0) targetMass *= 0.82;
@@ -1206,7 +1220,7 @@ public sealed class InputCounterForm : Form
                     ? particle.BaseOrbitRadius * (float)(1.0 - particleSettle) + compactRadius * (float)particleSettle
                     : particle.BaseOrbitRadius;
                 particle.OrbitRadius += (desiredRadius - particle.OrbitRadius) * 0.12F;
-                particle.OrbitAngle += (0.025 + auraSpeed * 0.13 + (particle.Variant % 3) * 0.004) * motionFactor * particle.OrbitDirection;
+                particle.OrbitAngle += (0.025 + auraSpeed * 0.13 + audioLevel * 0.16 + (particle.Variant % 3) * 0.004) * motionFactor * particle.OrbitDirection;
                 // Fast tiers can overshoot radially, but every orbit remains
                 // geometrically circular regardless of speed or direction.
                 float excessSpeed = Math.Max(0F, motionFactor - 0.80F);
@@ -1216,7 +1230,8 @@ public sealed class InputCounterForm : Form
                 particle.RadialVelocity *= 0.965F;
                 particle.RadialOffset += particle.RadialVelocity;
                 particle.RadialOffset = Math.Max(-maxExcursion, Math.Min(maxExcursion, particle.RadialOffset));
-                float activeRadius = particle.OrbitRadius + particle.RadialOffset;
+                float audioWave = (float)Math.Sin(audioPhase * 2.0 + particle.Variant * 1.71) * audioLevel * 5.5F;
+                float activeRadius = particle.OrbitRadius + particle.RadialOffset + audioWave;
                 float localX = (float)Math.Cos(particle.OrbitAngle) * activeRadius;
                 float localY = (float)Math.Sin(particle.OrbitAngle) * activeRadius;
                 float tiltCos = (float)Math.Cos(particle.OrbitTilt), tiltSin = (float)Math.Sin(particle.OrbitTilt);
@@ -1259,7 +1274,8 @@ public sealed class InputCounterForm : Form
         Color styleTint = Color.FromArgb(80, 185, 255);
         Color coreTint = Color.White;
         float baseRadius = 5.5F + (float)auraMass * 7.5F;
-        float pulse = 1F + (float)Math.Sin(auraPhase * 2.2) * (0.035F + (float)auraSpeed * 0.12F);
+        float audioPulse = audioLevel * 0.16F + audioBeat * 0.11F;
+        float pulse = 1F + (float)Math.Sin(auraPhase * 2.2 + audioPhase * 0.7) * (0.035F + (float)auraSpeed * 0.12F + audioPulse);
         float radius = baseRadius * pulse;
 
         // Permanent all-time memory appears as increasingly visible peripheral motes,
@@ -1277,6 +1293,7 @@ public sealed class InputCounterForm : Form
             using (SolidBrush brush = new SolidBrush(styleTint)) graphics.FillEllipse(brush, x - 1.25F, y - 1.25F, 2.5F, 2.5F);
         }
         DrawAuroraHalo(graphics, core, radius);
+        DrawAudioAuraEffects(graphics, core, radius);
         using (SolidBrush coreBrush = new SolidBrush(coreTint)) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
         using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
@@ -1306,13 +1323,57 @@ public sealed class InputCounterForm : Form
             RectangleF bounds = new RectangleF(core.X - haloRadius, core.Y - haloRadius, haloRadius * 2F, haloRadius * 2F);
             for (int i = 0; i < segmentCount; i++)
             {
-                double colourPosition = auraPhase * 1.35 + i * 0.36 + layer * 0.22;
+                double colourPosition = auraPhase * (1.35 + audioLevel * 2.4) + audioPhase * 0.42 + i * 0.36 + layer * 0.22;
                 int baseIndex = ((int)Math.Floor(colourPosition) % palette.Length + palette.Length) % palette.Length;
                 double blend = colourPosition - Math.Floor(colourPosition);
                 Color baseColour = Blend(palette[baseIndex], palette[(baseIndex + 1) % palette.Length], blend);
-                using (Pen aurora = new Pen(baseColour, 1.1F + layer * 0.20F))
+                using (Pen aurora = new Pen(baseColour, 1.1F + layer * 0.20F + audioLevel * 0.85F))
                     graphics.DrawArc(aurora, bounds, i * 360F / segmentCount - 2F, 360F / segmentCount + 3F);
             }
+        }
+        graphics.SmoothingMode = oldSmoothing;
+    }
+    private void DrawAudioAuraEffects(Graphics graphics, PointF core, float coreRadius)
+    {
+        if (audioLevel < 0.012F) return;
+        // Seven audio-only cosmetic responses live here: expanding rings,
+        // radial rays, short arcs, sparks, orbit waves, faster Aurora, and
+        // Core pulse. All use opaque pixels to preserve clean color-key edges.
+        Color[] colours =
+        {
+            Color.FromArgb(100, 225, 255), Color.FromArgb(118, 150, 255),
+            Color.FromArgb(194, 112, 255), Color.FromArgb(96, 250, 204), Color.White
+        };
+        System.Drawing.Drawing2D.SmoothingMode oldSmoothing = graphics.SmoothingMode;
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+        int rippleCount = 1 + (int)(audioLevel * 3F);
+        for (int ring = 0; ring < rippleCount; ring++)
+        {
+            float ringRadius = coreRadius + 13F + ring * (7F + audioLevel * 8F) + (float)((audioPhase * 14.0 + ring * 9.0) % 17.0);
+            RectangleF bounds = new RectangleF(core.X - ringRadius, core.Y - ringRadius, ringRadius * 2F, ringRadius * 2F);
+            Color colour = colours[(ring + (int)(audioPhase * 3.0)) % colours.Length];
+            using (Pen pen = new Pen(colour, 1F + audioLevel * 1.1F))
+                for (int arc = 0; arc < 8; arc++) graphics.DrawArc(pen, bounds, arc * 45F + (float)(audioPhase * 28.0), 17F + audioBeat * 12F);
+        }
+        int rayCount = Math.Min(16, 3 + (int)(audioLevel * 15F));
+        for (int ray = 0; ray < rayCount; ray++)
+        {
+            double angle = audioPhase * (0.9 + (ray % 3) * 0.16) + ray * Math.PI * 2.0 / rayCount;
+            float inner = coreRadius + 12F + (ray % 3) * 3F;
+            float length = 5F + audioLevel * 19F + audioBeat * 11F;
+            Color colour = colours[(ray + (int)(audioPhase * 5.0)) % colours.Length];
+            using (Pen pen = new Pen(colour, 1F + audioLevel * 1.35F))
+                graphics.DrawLine(pen, core.X + (float)Math.Cos(angle) * inner, core.Y + (float)Math.Sin(angle) * inner, core.X + (float)Math.Cos(angle) * (inner + length), core.Y + (float)Math.Sin(angle) * (inner + length));
+        }
+        int sparkleCount = Math.Min(10, 1 + (int)(audioLevel * 9F));
+        for (int sparkle = 0; sparkle < sparkleCount; sparkle++)
+        {
+            double angle = audioPhase * 1.7 + sparkle * 2.399;
+            float distance = coreRadius + 22F + (sparkle % 4) * 6F + audioBeat * 13F;
+            float x = core.X + (float)Math.Cos(angle) * distance;
+            float y = core.Y + (float)Math.Sin(angle) * distance;
+            Color colour = colours[(sparkle + 2) % colours.Length];
+            using (SolidBrush sparkleBrush = new SolidBrush(colour)) graphics.FillEllipse(sparkleBrush, x - 1.2F, y - 1.2F, 2.4F, 2.4F);
         }
         graphics.SmoothingMode = oldSmoothing;
     }
@@ -1730,7 +1791,7 @@ public sealed class InputCounterForm : Form
             if (!hudBackgroundPanel.Bounds.Contains(point)) m.Result = (IntPtr)HTTRANSPARENT;
         }
     }
-    protected override void OnFormClosed(FormClosedEventArgs e) { trayIcon.Visible = false; trayIcon.Dispose(); if (auraWindow != null && !auraWindow.IsDisposed) auraWindow.Close(); EnsureDailyTotal(); EnsurePlanetCollectionDate(); SavePlanetCollection(); if (allTimeDirty) SaveAllTimeTotal(); if (totalDirty) SaveTotalCount(); if (totalHighScoreDirty) SaveTotalHighScore(); CommitAuraDiary(); FlushLogs(); shakeTimer.Stop(); totalAnimationTimer.Stop(); auraTimer.Stop(); bubbleTimer.Stop(); if (keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(keyboardHook); if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook); base.OnFormClosed(e); }
+    protected override void OnFormClosed(FormClosedEventArgs e) { trayIcon.Visible = false; trayIcon.Dispose(); audioPeakMonitor.Dispose(); if (auraWindow != null && !auraWindow.IsDisposed) auraWindow.Close(); EnsureDailyTotal(); EnsurePlanetCollectionDate(); SavePlanetCollection(); if (allTimeDirty) SaveAllTimeTotal(); if (totalDirty) SaveTotalCount(); if (totalHighScoreDirty) SaveTotalHighScore(); CommitAuraDiary(); FlushLogs(); shakeTimer.Stop(); totalAnimationTimer.Stop(); auraTimer.Stop(); bubbleTimer.Stop(); if (keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(keyboardHook); if (mouseHook != IntPtr.Zero) UnhookWindowsHookEx(mouseHook); base.OnFormClosed(e); }
     [STAThread] public static void Main() { Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new InputCounterForm()); }
 }
 
@@ -1739,3 +1800,90 @@ internal static class NativeMethods
     [DllImport("user32.dll")] internal static extern bool ReleaseCapture();
     [DllImport("user32.dll")] internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 }
+
+// Reads only the current peak meter of the active Windows output device. It
+// does not open a recording stream and never retains audio samples or content.
+internal sealed class AudioPeakMonitor : IDisposable
+{
+    private IMMDeviceEnumerator deviceEnumerator;
+    private IMMDevice device;
+    private IAudioMeterInformation meter;
+    private DateTime nextRetry = DateTime.MinValue;
+
+    internal float GetPeak()
+    {
+        try
+        {
+            if (meter == null)
+            {
+                if (DateTime.UtcNow < nextRetry) return 0F;
+                Connect();
+            }
+            float peak;
+            meter.GetPeakValue(out peak);
+            return Math.Max(0F, Math.Min(1F, peak));
+        }
+        catch
+        {
+            ReleaseAudioObjects();
+            nextRetry = DateTime.UtcNow.AddSeconds(2);
+            return 0F;
+        }
+    }
+
+    private void Connect()
+    {
+        ReleaseAudioObjects();
+        deviceEnumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+        deviceEnumerator.GetDefaultAudioEndpoint(EDataFlow.eRender, ERole.eConsole, out device);
+        Guid meterId = typeof(IAudioMeterInformation).GUID;
+        object activated;
+        device.Activate(ref meterId, 23, IntPtr.Zero, out activated);
+        meter = (IAudioMeterInformation)activated;
+    }
+
+    private void ReleaseAudioObjects()
+    {
+        ReleaseComObject(meter); meter = null;
+        ReleaseComObject(device); device = null;
+        ReleaseComObject(deviceEnumerator); deviceEnumerator = null;
+    }
+
+    private static void ReleaseComObject(object value)
+    {
+        if (value != null && Marshal.IsComObject(value)) Marshal.ReleaseComObject(value);
+    }
+
+    public void Dispose() { ReleaseAudioObjects(); }
+}
+
+internal enum EDataFlow { eRender, eCapture, eAll }
+internal enum ERole { eConsole, eMultimedia, eCommunications }
+
+[ComImport, Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IAudioMeterInformation
+{
+    void GetPeakValue(out float peak);
+    void GetMeteringChannelCount(out int channelCount);
+    void GetChannelsPeakValues(int channelCount, [Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] float[] peakValues);
+    void QueryHardwareSupport(out int hardwareSupportMask);
+}
+
+[ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDevice
+{
+    void Activate(ref Guid iid, int classContext, IntPtr activationParameters, [MarshalAs(UnmanagedType.IUnknown)] out object activatedInterface);
+    void OpenPropertyStore(int accessMode, out IntPtr properties);
+    void GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+    void GetState(out int state);
+}
+
+[ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IMMDeviceEnumerator
+{
+    void EnumAudioEndpoints(EDataFlow dataFlow, int stateMask, out IntPtr devices);
+    void GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice endpoint);
+}
+
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+internal class MMDeviceEnumeratorComObject { }

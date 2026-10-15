@@ -8,6 +8,7 @@ Small, always-on-top Windows HUD that counts physical keyboard and mouse input w
 - One physical key-down per press; held keys are counted once until released.
 - Idle decay after three seconds, Echo Cascade, Critical Hit, and rare Rewind events.
 - A transparent Typing Aura companion with a white Living Core, particle orbits, planets, and bidirectional wind at high typing speed.
+- Audio Aura reacts only to the current Windows speaker-output peak; it neither records nor stores audio.
 - Local-only persistence for scores, Aura diary, and daily planet collection. No key content is recorded or uploaded.
 - Left-click drag; right-click the HUD or Core to close.
 
@@ -20,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `InputCounter-core-bottom-right.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `InputCounter-audio-aura.exe`. The executable and all local score data are intentionally ignored by Git.
