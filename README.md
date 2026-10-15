@@ -21,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `InputCounter-audio-aura.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `InputCounter-audio-aura-calm.exe`. The executable and all local score data are intentionally ignored by Git.
