@@ -33,7 +33,6 @@ public sealed class InputCounterForm : Form
     private static readonly bool DebugRewindKeywordTrigger = false;
     private const int MaxRenderedAuraParticles = 1000;
     private readonly Label totalLabel = new Label(), totalHighScoreLabel = new Label(), detailLabel = new Label(), highScoreLabel = new Label(), allTimeLabel = new Label();
-    private readonly EffectLabel comboLabel = new EffectLabel();
     private readonly Panel hudBackgroundPanel = new Panel();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
     private HookProc keyboardProc, mouseProc;
@@ -63,6 +62,7 @@ public sealed class InputCounterForm : Form
     private int comboFlashFrames;
     private readonly List<Particle> particles = new List<Particle>();
     private readonly List<FloatingEffect> floatingEffects = new List<FloatingEffect>();
+    private FloatingEffect activeComboStreakEffect;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -151,7 +151,6 @@ public sealed class InputCounterForm : Form
         detailLabel.BackColor = hudBackground; detailLabel.ForeColor = Color.FromArgb(163, 196, 255); detailLabel.Font = new Font("Segoe UI", 8F); detailLabel.Location = new Point(4, hudTop + 48); detailLabel.Size = new Size(HudWidth - 8, 15); detailLabel.TextAlign = ContentAlignment.MiddleCenter;
         highScoreLabel.BackColor = hudBackground; highScoreLabel.ForeColor = Color.FromArgb(163, 196, 255); highScoreLabel.Font = new Font("Segoe UI", 6.5F); highScoreLabel.Location = new Point(4, hudTop + 66); highScoreLabel.Size = new Size(HudWidth - 8, 13); highScoreLabel.TextAlign = ContentAlignment.MiddleCenter;
         allTimeLabel.BackColor = hudBackground; allTimeLabel.ForeColor = Color.FromArgb(205, 210, 220); allTimeLabel.Font = new Font("Segoe UI", 6.5F); allTimeLabel.Location = new Point(4, hudTop + 83); allTimeLabel.Size = new Size(HudWidth - 8, 13); allTimeLabel.TextAlign = ContentAlignment.MiddleCenter;
-        comboLabel.AutoSize = true; comboLabel.Visible = false; comboLabel.Font = new Font("Segoe UI Semibold", 8F); comboLabel.ForeColor = Color.FromArgb(150, 218, 255); comboLabel.BackColor = Color.Transparent;
         highScore = 0;
         totalCount = LoadTotalCount();
         lastInputCheckpoint = totalCount;
@@ -162,9 +161,9 @@ public sealed class InputCounterForm : Form
         activeElement = ResolveAutoElement();
         foreach (string eventName in InputEventNames) inputEventKeyPressCounts[eventName] = 0;
         foreach (string eventName in IdleEventNames) idleEventDecayedKeyCounts[eventName] = 0;
-        Controls.Add(hudBackgroundPanel); Controls.Add(totalLabel); Controls.Add(totalHighScoreLabel); Controls.Add(detailLabel); Controls.Add(highScoreLabel); Controls.Add(allTimeLabel); Controls.Add(comboLabel); hudBackgroundPanel.SendToBack(); UpdateDisplay();
+        Controls.Add(hudBackgroundPanel); Controls.Add(totalLabel); Controls.Add(totalHighScoreLabel); Controls.Add(detailLabel); Controls.Add(highScoreLabel); Controls.Add(allTimeLabel); hudBackgroundPanel.SendToBack(); UpdateDisplay();
         SyncAuraParticlesToScore();
-        MouseDown += WindowMouseDown; hudBackgroundPanel.MouseDown += WindowMouseDown; totalLabel.MouseDown += WindowMouseDown; totalHighScoreLabel.MouseDown += WindowMouseDown; detailLabel.MouseDown += WindowMouseDown; highScoreLabel.MouseDown += WindowMouseDown; allTimeLabel.MouseDown += WindowMouseDown; comboLabel.MouseDown += WindowMouseDown;
+        MouseDown += WindowMouseDown; hudBackgroundPanel.MouseDown += WindowMouseDown; totalLabel.MouseDown += WindowMouseDown; totalHighScoreLabel.MouseDown += WindowMouseDown; detailLabel.MouseDown += WindowMouseDown; highScoreLabel.MouseDown += WindowMouseDown; allTimeLabel.MouseDown += WindowMouseDown;
         totalBaseLocation = totalLabel.Location;
         rateTimer.Interval = 1000;
         rateTimer.Tick += delegate
@@ -279,18 +278,30 @@ public sealed class InputCounterForm : Form
         int resolvedStreak = comboStreak;
         comboStreak = 0;
         lastComboKeyAt = DateTime.MinValue;
-        comboLabel.Visible = false;
+        activeComboStreakEffect = null;
         ResolveComboCascade(resolvedStreak);
     }
     private void UpdateComboStreakIndicator()
     {
-        // This is text only—not a bubble or a new HUD row—anchored directly
-        // above the Total so the live streak can be read while typing.
-        if (comboStreak < 2) { comboLabel.Visible = false; return; }
-        comboLabel.Text = "COMBO x" + comboStreak;
-        comboLabel.Location = new Point(totalBaseLocation.X + 5, hudTop - 16);
-        comboLabel.Visible = true;
-        comboLabel.BringToFront();
+        // A single live streak text flies out of Total; each next key refreshes
+        // it instead of creating a stationary HUD label or a text trail.
+        if (comboStreak < 2) return;
+        if (activeComboStreakEffect == null || !floatingEffects.Contains(activeComboStreakEffect))
+        {
+            activeComboStreakEffect = new FloatingEffect();
+            activeComboStreakEffect.Increasing = true; activeComboStreakEffect.Critical = true;
+            activeComboStreakEffect.CriticalColor = Color.FromArgb(150, 218, 255);
+            activeComboStreakEffect.ComboStreak = true;
+            activeComboStreakEffect.Label = new EffectLabel { AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Semibold", 9.5F), ForeColor = Color.FromArgb(150, 218, 255) };
+            floatingEffects.Add(activeComboStreakEffect);
+        }
+        activeComboStreakEffect.Label.Text = "COMBO x" + comboStreak;
+        activeComboStreakEffect.X = totalBaseLocation.X + totalLabel.Width - 42;
+        activeComboStreakEffect.Y = totalBaseLocation.Y + 4;
+        activeComboStreakEffect.VelocityX = 0.35F + (float)random.NextDouble() * 0.35F;
+        activeComboStreakEffect.VelocityY = -1.05F - (float)random.NextDouble() * 0.45F;
+        activeComboStreakEffect.Life = activeComboStreakEffect.MaxLife = 42;
+        totalAnimationTimer.Start();
     }
     private void ResolveComboCascade(int streak)
     {
@@ -665,9 +676,11 @@ public sealed class InputCounterForm : Form
         float speed = coreBloom ? 2.1F : 1.25F + (float)((50.0 - chancePercent) / 50.0) * 1.15F;
         effect.VelocityX = (float)Math.Cos(angle) * speed;
         effect.VelocityY = (float)Math.Sin(angle) * speed - 0.35F;
-        effect.Life = effect.MaxLife = coreBloom ? 190 : 125;
+        effect.Life = effect.MaxLife = coreBloom ? 205 : 150;
         effect.CriticalColor = coreBloom ? Color.White : Color.FromArgb(115, 205, 255);
-        effect.Label = new CriticalLabel { Text = CompactChance(chancePercent) + "%  +" + bonus, AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Black", coreBloom ? 13F : 10.5F), ForeColor = effect.CriticalColor };
+        // The successful probability is the dominant readable visual: direct
+        // text over the HUD, with no label background, border, or bubble.
+        effect.Label = new CriticalLabel { Text = CompactChance(chancePercent) + "%  +" + bonus, AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Black", coreBloom ? 20F : 16F), ForeColor = effect.CriticalColor };
         floatingEffects.Add(effect);
     }
     private void TriggerComboCoreExplosion(double chancePercent, bool coreBloom)
@@ -926,6 +939,7 @@ public sealed class InputCounterForm : Form
             }
             if (effect.Life <= 0)
             {
+                if (ReferenceEquals(activeComboStreakEffect, effect)) activeComboStreakEffect = null;
                 if (effect.FrontControl && Controls.Contains(effect.Label)) Controls.Remove(effect.Label);
                 effect.Label.Dispose();
                 floatingEffects.RemoveAt(i);
@@ -1736,7 +1750,7 @@ public sealed class InputCounterForm : Form
         internal Label Label;
         internal float X, Y, VelocityX, VelocityY, Life, MaxLife;
         internal bool Increasing;
-        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl;
+        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak;
         internal int Multiplier;
         internal Color CriticalColor;
     }
