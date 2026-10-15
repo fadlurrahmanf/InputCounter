@@ -21,4 +21,4 @@ Build-InputCounter.cmd
 Start-InputCounter.cmd
 ```
 
-The build script creates `InputCounter-combo-stars.exe`. The executable and all local score data are intentionally ignored by Git.
+The build script creates `InputCounter-stars-guaranteed.exe`. The executable and all local score data are intentionally ignored by Git.

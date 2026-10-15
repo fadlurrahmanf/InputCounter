@@ -34,7 +34,6 @@ public sealed class InputCounterForm : Form
     // only enabled in the separate temporary demo executable.
     private static readonly bool DebugRewindKeywordTrigger = false;
     private const int MaxRenderedAuraParticles = 1000;
-    private const double ComboStarChancePercent = 0.01;
     private readonly Label totalLabel = new Label(), totalHighScoreLabel = new Label(), detailLabel = new Label(), highScoreLabel = new Label(), allTimeLabel = new Label();
     private readonly Panel hudBackgroundPanel = new Panel();
     private readonly NotifyIcon trayIcon = new NotifyIcon();
@@ -76,10 +75,11 @@ public sealed class InputCounterForm : Form
     private readonly Queue<ComboCascadeVisual> queuedComboCascadeVisuals = new Queue<ComboCascadeVisual>();
     private DateTime activeComboVisualUntil = DateTime.MinValue;
     private long comboStarCount;
+    private long comboStarFailureCount;
     private bool comboStarsDirty;
-    // This session starts at 0.01%; each natural Combo success raises it by
-    // another 0.01%. It intentionally has no hard cap.
-    private double comboStarChancePercent = ComboStarChancePercent;
+    private readonly Queue<StarAwardVisual> queuedStarAwards = new Queue<StarAwardVisual>();
+    private StarAwardVisual activeStarAward;
+    private DateTime starCorePulseUntil = DateTime.MinValue;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -174,7 +174,7 @@ public sealed class InputCounterForm : Form
         lastInputCheckpoint = totalCount;
         totalHighScore = LoadTotalHighScore();
         allTimeTotal = LoadAllTimeTotal();
-        comboStarCount = LoadComboStars();
+        LoadComboStars();
         auraDiary = LoadAuraDiary();
         LoadPlanetCollection();
         activeElement = ResolveAutoElement();
@@ -365,12 +365,13 @@ public sealed class InputCounterForm : Form
         // its roll chance: +100 at 100%, then +75 at 75%, +56 at 56%, and so
         // on. A percentage cannot exceed 100, while the score bonus itself is
         // left intact for streaks above 100.
-        int bonus = Math.Max(1, streak);
-        double chance = Math.Min(100.0, (double)bonus);
+        double chance = Math.Max(1.0, (double)streak);
+        int bonus = Math.Max(1, (int)Math.Round(chance, MidpointRounding.AwayFromZero));
         for (int step = 0; step < 64; step++)
         {
             if (random.NextDouble() * 100.0 >= chance)
             {
+                RecordComboCascadeFailure();
                 StartComboFailureVisual(chance);
                 if (streak > 100 && chance < 50.0 && comboStarCount > 0)
                 {
@@ -392,8 +393,8 @@ public sealed class InputCounterForm : Form
                     QueueComboCascadeVisual(bonus, chance, rescueBloom, true, true);
                     LogChange("COMBO_STAR_RESCUE", bonus, rescueBefore, totalCount, recentInputs.Count, bonus, null);
                     if (rescueBloom) { ApplyComboCoreBloomReward(); comboOnePercentHits = 0; }
-                    bonus = Math.Max(1, (int)Math.Floor(bonus * 0.75));
-                    chance = Math.Min(100.0, (double)bonus);
+                    chance *= 0.75;
+                    bonus = Math.Max(1, (int)Math.Round(chance, MidpointRounding.AwayFromZero));
                     continue;
                 }
                 break;
@@ -408,15 +409,14 @@ public sealed class InputCounterForm : Form
             if (isOnePercent) comboOnePercentHits++;
             bool coreBloom = isOnePercent && comboOnePercentHits >= 3;
             StartComboCascadeVisual(bonus, chance, coreBloom);
-            comboStarChancePercent += ComboStarChancePercent;
             LogChange("COMBO_CASCADE", bonus, before, totalCount, recentInputs.Count, bonus, null);
             if (coreBloom)
             {
                 ApplyComboCoreBloomReward();
                 comboOnePercentHits = 0;
             }
-            bonus = Math.Max(1, (int)Math.Floor(bonus * 0.75));
-            chance = Math.Min(100.0, (double)bonus);
+            chance *= 0.75;
+            bonus = Math.Max(1, (int)Math.Round(chance, MidpointRounding.AwayFromZero));
         }
         UpdateDisplay();
     }
@@ -477,7 +477,6 @@ public sealed class InputCounterForm : Form
         EnsureDailyTotal();
         EnsurePlanetCollectionDate();
         TryPlanetGacha();
-        TryAwardComboStar();
         DateTime now = DateTime.UtcNow;
         DateTime cutoff = now.AddSeconds(-1);
         while (recentInputs.Count > 0 && recentInputs.Peek() < cutoff) recentInputs.Dequeue();
@@ -506,14 +505,14 @@ public sealed class InputCounterForm : Form
         LogChange(multiplier > 1 ? "INPUT_CRITICAL" : "INPUT_NORMAL", multiplier, totalCount - multiplier, totalCount, recentInputs.Count, multiplier, null);
         UpdateDisplay();
     }
-    private void TryAwardComboStar()
+    private void RecordComboCascadeFailure()
     {
-        if (random.NextDouble() * 100.0 >= comboStarChancePercent) return;
+        comboStarFailureCount++;
+        if (comboStarFailureCount != 100) { comboStarsDirty = true; return; }
+        comboStarFailureCount = 0;
         comboStarCount++;
         comboStarsDirty = true;
-        // A collected STAR restarts the escalating drop chance for this
-        // session. STAR storage itself remains unlimited.
-        comboStarChancePercent = ComboStarChancePercent;
+        queuedStarAwards.Enqueue(new StarAwardVisual { Angle = random.NextDouble() * Math.PI * 2.0, StartedAt = DateTime.MinValue });
     }
     private void EnsurePlanetCollectionDate()
     {
@@ -1455,7 +1454,7 @@ public sealed class InputCounterForm : Form
             X = x, Y = y, PreviousX = x, PreviousY = y,
             OrbitAngle = random.NextDouble() * Math.PI * 2.0, OrbitTilt = random.NextDouble() * Math.PI * 2.0, OrbitDirection = random.Next(2) == 0 ? -1 : 1,
             OrbitRadius = 16F + random.Next(29),
-            Life = 330, MaxLife = 330, CreatedAt = DateTime.UtcNow, SettleDurationSeconds = 60 + random.Next(541), SpeedTier = random.Next(25, 101), AuraColor = RandomAuraParticleColor(), Entering = true, Variant = random.Next(10)
+            Life = 330, MaxLife = 330, CreatedAt = DateTime.UtcNow, SettleDurationSeconds = 60 + random.Next(541), SpeedTier = random.Next(25, 101), AuraColor = RandomAuraParticleColor(), Entering = true, Variant = random.Next(10), ScaleIntervalMilliseconds = random.Next(0, 1001), ScalePhaseRadians = random.NextDouble() * Math.PI * 2.0
         });
         auraParticles[auraParticles.Count - 1].BaseOrbitRadius = auraParticles[auraParticles.Count - 1].OrbitRadius;
     }
@@ -1530,6 +1529,7 @@ public sealed class InputCounterForm : Form
     }
     private void UpdateTypingAura()
     {
+        AdvanceStarAwardAnimation();
         DateTime cutoff = DateTime.UtcNow.AddSeconds(-1);
         while (recentInputs.Count > 0 && recentInputs.Peek() < cutoff) recentInputs.Dequeue();
         int keysPerSecond = recentInputs.Count;
@@ -1654,6 +1654,12 @@ public sealed class InputCounterForm : Form
         // particle shape/path only, keeping rewind from tinting the Core green.
         Color styleTint = Color.FromArgb(80, 185, 255);
         Color coreTint = Color.White;
+        if (DateTime.UtcNow < starCorePulseUntil)
+        {
+            double pulseProgress = 1.0 - (starCorePulseUntil - DateTime.UtcNow).TotalMilliseconds / 720.0;
+            double warmth = Math.Max(0.0, Math.Sin(pulseProgress * Math.PI)) * 0.82;
+            coreTint = Blend(Color.White, Color.FromArgb(255, 232, 92), warmth);
+        }
         float baseRadius = 5.5F + (float)auraMass * 7.5F;
         // Deliberately noticeable on real speaker output, without the busy
         // full-screen rays used by the first Audio Aura revision.
@@ -1682,6 +1688,7 @@ public sealed class InputCounterForm : Form
         using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
         DrawComboStars(graphics, core, radius);
+        DrawStarAwardAnimation(graphics, core, radius);
         // Wind is intentionally drawn over the particle cloud so rapid input
         // remains clearly readable instead of disappearing behind 1,000 dots.
         DrawSpeedWind(graphics, core, radius);
@@ -1693,7 +1700,9 @@ public sealed class InputCounterForm : Form
         // There is deliberately no collection cap. Each stored STAR has a
         // stable, individual orbit derived from its index and moves with the
         // same living Aura phase as the surrounding particles.
-        for (long index = 0; index < comboStarCount; index++)
+        long pendingAwards = queuedStarAwards.Count + (activeStarAward == null ? 0 : 1);
+        long settledStarCount = Math.Max(0, comboStarCount - pendingAwards);
+        for (long index = 0; index < settledStarCount; index++)
         {
             double seed = index * 2.399963229728653; // golden-angle spacing
             double angle = seed + auraPhase * (0.42 + (index % 7) * 0.037);
@@ -1702,6 +1711,40 @@ public sealed class InputCounterForm : Form
             float y = core.Y + (float)Math.Sin(angle) * orbit * (0.56F + (index % 5) * 0.045F);
             Color colour = (index % 3 == 0) ? Color.White : Color.FromArgb(255, 232, 72);
             DrawAuraStar(graphics, x, y, 1.45F + (index % 4) * 0.18F, colour);
+        }
+    }
+    private void AdvanceStarAwardAnimation()
+    {
+        DateTime now = DateTime.UtcNow;
+        if (activeStarAward != null)
+        {
+            if ((now - activeStarAward.StartedAt).TotalMilliseconds >= 1450.0) activeStarAward = null;
+            return;
+        }
+        // STAR notices wait until speech bubbles and Combo feedback are clear.
+        if (queuedStarAwards.Count == 0 || HasActiveComboVisual() || bubbleShowsRareChance || planetGachaActive) return;
+        activeStarAward = queuedStarAwards.Dequeue();
+        activeStarAward.StartedAt = now;
+        starCorePulseUntil = now.AddMilliseconds(720);
+    }
+    private void DrawStarAwardAnimation(Graphics graphics, PointF core, float coreRadius)
+    {
+        if (activeStarAward == null) return;
+        double progress = Math.Max(0.0, Math.Min(1.0, (DateTime.UtcNow - activeStarAward.StartedAt).TotalMilliseconds / 1450.0));
+        double ease = 1.0 - Math.Pow(1.0 - progress, 3.0);
+        float startOrbit = coreRadius + 140F;
+        float settleOrbit = coreRadius + 22F;
+        float orbit = startOrbit + (settleOrbit - startOrbit) * (float)ease;
+        float x = core.X + (float)Math.Cos(activeStarAward.Angle) * orbit;
+        float y = core.Y + (float)Math.Sin(activeStarAward.Angle) * orbit * 0.62F;
+        Color starColour = Blend(Color.FromArgb(255, 222, 52), Color.White, Math.Min(1.0, progress * 1.15));
+        DrawAuraStar(graphics, x, y, 4.2F - (float)progress * 1.8F, starColour);
+        float textRise = (float)(progress * 30.0);
+        using (Font font = new Font("Segoe UI Black", 16F))
+        {
+            Size textSize = TextRenderer.MeasureText("STAR", font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding);
+            Point textPoint = new Point((int)(x - textSize.Width / 2F), (int)(y - 32F - textRise));
+            TextRenderer.DrawText(graphics, "STAR", font, textPoint, starColour, TextFormatFlags.NoPadding);
         }
     }
     private void DrawComboCoreExplosion(Graphics graphics, PointF core, float coreRadius)
@@ -1899,11 +1942,17 @@ public sealed class InputCounterForm : Form
         else if (DateTime.UtcNow < auraRewindGreenUntil && particle.RewindGreenTarget)
             colour = RewindAuraColor;
         double settle = GetParticleSettleProgress(particle);
-        float scale = 1F - (float)settle * 0.72F;
+        int interval = Math.Max(1, particle.ScaleIntervalMilliseconds);
+        double scalePhase = (DateTime.UtcNow - particle.CreatedAt).TotalMilliseconds / interval * Math.PI * 2.0 + particle.ScalePhaseRadians;
+        // Every particle breathes independently from 50% to 150% of normal
+        // size, using its own sampled 0–1000 ms interval.
+        float breathe = 1F + 0.5F * (float)Math.Sin(scalePhase);
+        float scale = (1F - (float)settle * 0.72F) * breathe;
         if (settle >= 0.995)
         {
             // Final resting dot: exactly one tenth of the former 1.1px diameter.
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(alpha, colour))) graphics.FillEllipse(brush, particle.X - 0.055F, particle.Y - 0.055F, 0.11F, 0.11F);
+            float dotSize = 0.11F * breathe;
+            using (SolidBrush brush = new SolidBrush(Color.FromArgb(alpha, colour))) graphics.FillEllipse(brush, particle.X - dotSize / 2F, particle.Y - dotSize / 2F, dotSize, dotSize);
             return;
         }
         // All Aura particles are circular dots; themes only influence motion
@@ -1949,7 +1998,8 @@ public sealed class InputCounterForm : Form
         internal int Life, MaxLife, Variant, OrbitDirection;
         internal DateTime CreatedAt;
         internal int SettleDurationSeconds;
-        internal int SpeedTier;
+        internal int SpeedTier, ScaleIntervalMilliseconds;
+        internal double ScalePhaseRadians;
         internal Color AuraColor;
         internal bool Entering, DecayRedTarget, RewindGreenTarget;
     }
@@ -1966,6 +2016,11 @@ public sealed class InputCounterForm : Form
         internal bool CoreBloom;
         internal bool Succeeded;
         internal bool StarRescue;
+    }
+    private sealed class StarAwardVisual
+    {
+        internal double Angle;
+        internal DateTime StartedAt;
     }
     private enum ElementStyle
     {
@@ -2161,22 +2216,23 @@ public sealed class InputCounterForm : Form
         try { System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(allTimePath)); System.IO.File.WriteAllText(allTimePath, allTimeTotal.ToString()); allTimeDirty = false; }
         catch { }
     }
-    private long LoadComboStars()
+    private void LoadComboStars()
     {
         try
         {
-            long saved;
-            if (long.TryParse(System.IO.File.ReadAllText(comboStarsPath), out saved)) return Math.Max(0, saved);
+            string[] saved = System.IO.File.ReadAllText(comboStarsPath).Split('|');
+            long stars, failures;
+            if (saved.Length >= 1 && long.TryParse(saved[0], out stars)) comboStarCount = Math.Max(0, stars);
+            if (saved.Length >= 2 && long.TryParse(saved[1], out failures)) comboStarFailureCount = Math.Max(0, Math.Min(99, failures));
         }
         catch { }
-        return 0;
     }
     private void SaveComboStars()
     {
         try
         {
             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(comboStarsPath));
-            System.IO.File.WriteAllText(comboStarsPath, comboStarCount.ToString());
+            System.IO.File.WriteAllText(comboStarsPath, comboStarCount + "|" + comboStarFailureCount);
             comboStarsDirty = false;
         }
         catch { }
