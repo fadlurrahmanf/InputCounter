@@ -1,2 +1,2 @@
 @echo off
-start "Input Counter" "%~dp0InputCounter-combo-transparent.exe"
+start "Input Counter" "%~dp0InputCounter-combo-bubbleless.exe"

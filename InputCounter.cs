@@ -191,7 +191,10 @@ public sealed class InputCounterForm : Form
         bubbleTimer.Interval = 100;
         bubbleTimer.Tick += delegate { UpdateBubble(); };
         bubbleTimer.Start();
-        Paint += delegate(object sender, PaintEventArgs e) { DrawParticles(e.Graphics, false); DrawBubble(e.Graphics); DrawParticles(e.Graphics, true); DrawFloatingEffects(e.Graphics); };
+        // Repaint the keyed transparent surface from a clean frame. This is
+        // essential when a bubble disappears: no rounded bubble pixels may
+        // remain behind a Combo overlay.
+        Paint += delegate(object sender, PaintEventArgs e) { e.Graphics.Clear(Color.Black); DrawBubble(e.Graphics); DrawParticles(e.Graphics, false); DrawParticles(e.Graphics, true); DrawFloatingEffects(e.Graphics); };
         restingLocation = Location;
         LocationChanged += delegate
         {
@@ -341,8 +344,9 @@ public sealed class InputCounterForm : Form
     }
     private void ResolveComboCascade(int streak)
     {
-        // The first chance equals the streak but never exceeds 50%. Every
-        // success halves both the chance and the score bonus down to +1/1%.
+        // The first chance equals the streak but never exceeds 50%. Each
+        // success halves the chance, while the bonus retains 75% of its last
+        // value (for example +20, then +15) down to +1.
         int bonus = Math.Max(1, streak);
         double chance = Math.Min(50.0, (double)streak);
         for (int step = 0; step < 64; step++)
@@ -364,7 +368,7 @@ public sealed class InputCounterForm : Form
                 ApplyComboCoreBloomReward();
                 comboOnePercentHits = 0;
             }
-            bonus = Math.Max(1, bonus / 2);
+            bonus = Math.Max(1, (int)Math.Floor(bonus * 0.75));
             chance = Math.Max(1.0, chance / 2.0);
         }
         UpdateDisplay();
@@ -1199,16 +1203,10 @@ public sealed class InputCounterForm : Form
     }
     private void DrawBubble(Graphics graphics)
     {
+        // Combo feedback is deliberately not a bubble. Hide every speech
+        // surface while its bare floating glyph is active.
+        if (HasActiveComboVisual()) return;
         if (planetGachaActive) { DrawPlanetGachaBubble(graphics); return; }
-        // Normal speech never competes with a live or resolving Combo. Rare
-        // notifications retain priority and may still be shown when required.
-        if (!bubbleShowsRareChance && HasActiveComboVisual())
-        {
-            // Bubble pixels are custom-painted, so explicitly restore this
-            // keyed-transparent region instead of leaving a stale bubble frame.
-            using (SolidBrush clear = new SolidBrush(Color.Black)) graphics.FillRectangle(clear, 0, 0, HudWidth, hudTop);
-            return;
-        }
         DateTime now = DateTime.UtcNow;
         double enter = Math.Min(1.0, Math.Max(0.0, (now - bubbleAppearedAt).TotalMilliseconds / 180.0));
         float yOffset = (float)((1.0 - enter) * 6.0);
