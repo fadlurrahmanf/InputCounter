@@ -1348,11 +1348,14 @@ public sealed class InputCounterForm : Form
         graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
         for (int layer = 0; layer < 3; layer++)
         {
+            // Alternate the visible Aurora flow; it is never locked to a
+            // single clockwise rotation.
+            int rotationDirection = (layer & 1) == 0 ? 1 : -1;
             float haloRadius = coreRadius + 5F + layer * 2.6F;
             RectangleF bounds = new RectangleF(core.X - haloRadius, core.Y - haloRadius, haloRadius * 2F, haloRadius * 2F);
             for (int i = 0; i < segmentCount; i++)
             {
-                double colourPosition = auraPhase * (1.35 + audioLevel * 2.4) + audioPhase * 0.42 + i * 0.36 + layer * 0.22;
+                double colourPosition = auraPhase * (1.35 + audioLevel * 2.4) + rotationDirection * audioPhase * 0.42 + i * 0.36 + layer * 0.22;
                 int baseIndex = ((int)Math.Floor(colourPosition) % palette.Length + palette.Length) % palette.Length;
                 double blend = colourPosition - Math.Floor(colourPosition);
                 Color baseColour = Blend(palette[baseIndex], palette[(baseIndex + 1) % palette.Length], blend);
@@ -1377,16 +1380,19 @@ public sealed class InputCounterForm : Form
         int rippleCount = audioBeat > 0.08F ? 2 : 1;
         for (int ring = 0; ring < rippleCount; ring++)
         {
-            float ringRadius = coreRadius + 12F + ring * 7F + (float)((audioPhase * 11.0) % 13.0);
+            int rotationDirection = (ring & 1) == 0 ? 1 : -1;
+            float movingRadius = (float)((audioPhase * 11.0) % 13.0);
+            float ringRadius = coreRadius + 12F + ring * 7F + (rotationDirection > 0 ? movingRadius : 13F - movingRadius);
             RectangleF bounds = new RectangleF(core.X - ringRadius, core.Y - ringRadius, ringRadius * 2F, ringRadius * 2F);
             Color colour = colours[(ring + (int)(audioPhase * 3.0)) % colours.Length];
             using (Pen pen = new Pen(colour, 1.35F))
-                for (int arc = 0; arc < 5; arc++) graphics.DrawArc(pen, bounds, arc * 72F + (float)(audioPhase * 22.0), 16F + audioBeat * 10F);
+                for (int arc = 0; arc < 5; arc++) graphics.DrawArc(pen, bounds, arc * 72F + rotationDirection * (float)(audioPhase * 22.0), 16F + audioBeat * 10F);
         }
         int sparkleCount = audioBeat > 0.20F ? 4 : 2;
         for (int sparkle = 0; sparkle < sparkleCount; sparkle++)
         {
-            double angle = audioPhase * 1.7 + sparkle * 2.399;
+            int rotationDirection = (sparkle & 1) == 0 ? 1 : -1;
+            double angle = rotationDirection * audioPhase * 1.7 + sparkle * 2.399;
             float distance = coreRadius + 20F + sparkle * 6F + audioBeat * 10F;
             float x = core.X + (float)Math.Cos(angle) * distance;
             float y = core.Y + (float)Math.Sin(angle) * distance;
