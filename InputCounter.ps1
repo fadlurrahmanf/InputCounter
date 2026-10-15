@@ -1,10 +1,10 @@
 #requires -Version 5.1
 
-$app = Join-Path $PSScriptRoot 'InputCounter-stars-chain-planets-front.exe'
+$app = Join-Path $PSScriptRoot 'InputCounter-near-miss-rescue-ripple.exe'
 if (-not (Test-Path -LiteralPath $app)) {
     Add-Type -AssemblyName System.Windows.Forms
     [System.Windows.Forms.MessageBox]::Show(
-        'InputCounter-stars-chain-planets-front.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
+        'InputCounter-near-miss-rescue-ripple.exe tidak ditemukan. Jalankan Build-InputCounter.cmd terlebih dahulu.',
         'Input Counter',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error

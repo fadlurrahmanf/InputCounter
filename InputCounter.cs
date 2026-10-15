@@ -80,6 +80,8 @@ public sealed class InputCounterForm : Form
     private readonly Queue<StarAwardVisual> queuedStarAwards = new Queue<StarAwardVisual>();
     private StarAwardVisual activeStarAward;
     private DateTime starCorePulseUntil = DateTime.MinValue;
+    private DateTime nearMissCorePulseUntil = DateTime.MinValue;
+    private DateTime starRescueRippleUntil = DateTime.MinValue;
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
     private readonly HashSet<string> dailyPlanets = new HashSet<string>();
     private readonly Queue<string> queuedPlanetGacha = new Queue<string>();
@@ -797,6 +799,8 @@ public sealed class InputCounterForm : Form
         totalLabel.Location = totalBaseLocation;
         comboFlashFrames = Math.Max(comboFlashFrames, step.CoreBloom ? 82 : step.Succeeded ? 24 : 0);
         SpawnComboChanceEffect(step.Bonus, step.ChancePercent, step.CoreBloom, step.Succeeded, step.StarRescue);
+        if (!step.Succeeded && step.ChancePercent < 10.0) nearMissCorePulseUntil = now.AddMilliseconds(680);
+        if (step.StarRescue) starRescueRippleUntil = now.AddMilliseconds(1200);
         if (step.Succeeded) TriggerComboCoreExplosion(step.ChancePercent, step.CoreBloom);
         // Each outcome has its own readable turn. The final failed percentage
         // stays slightly longer, then the speech bubble can resume.
@@ -1668,6 +1672,12 @@ public sealed class InputCounterForm : Form
             double warmth = Math.Max(0.0, Math.Sin(pulseProgress * Math.PI)) * 0.82;
             coreTint = Blend(Color.White, Color.FromArgb(255, 232, 92), warmth);
         }
+        if (DateTime.UtcNow < nearMissCorePulseUntil)
+        {
+            double pulseProgress = 1.0 - (nearMissCorePulseUntil - DateTime.UtcNow).TotalMilliseconds / 680.0;
+            double violet = Math.Max(0.0, Math.Sin(pulseProgress * Math.PI)) * 0.78;
+            coreTint = Blend(coreTint, Color.FromArgb(218, 160, 255), violet);
+        }
         float baseRadius = 5.5F + (float)auraMass * 7.5F;
         // Deliberately noticeable on real speaker output, without the busy
         // full-screen rays used by the first Audio Aura revision.
@@ -1699,6 +1709,7 @@ public sealed class InputCounterForm : Form
         // remains clearly readable instead of disappearing behind 1,000 dots.
         DrawSpeedWind(graphics, core, radius);
         DrawOwnedPlanets(graphics, core);
+        DrawStarRescueRipple(graphics, core, radius);
         // STARs are always the foreground layer, including above planets.
         DrawComboStars(graphics, core, radius);
         DrawStarAwardAnimation(graphics, core, radius);
@@ -1721,6 +1732,17 @@ public sealed class InputCounterForm : Form
             Color colour = (index % 3 == 0) ? Color.White : Color.FromArgb(255, 232, 72);
             DrawAuraStar(graphics, x, y, 1.45F + (index % 4) * 0.18F, colour);
         }
+    }
+    private void DrawStarRescueRipple(Graphics graphics, PointF core, float coreRadius)
+    {
+        if (DateTime.UtcNow >= starRescueRippleUntil) return;
+        double progress = 1.0 - (starRescueRippleUntil - DateTime.UtcNow).TotalMilliseconds / 1200.0;
+        double radiusFactor = progress < 0.55
+            ? 1.15 + progress / 0.55 * 4.1
+            : 5.25 - (progress - 0.55) / 0.45 * 4.1;
+        float rippleRadius = coreRadius * (float)radiusFactor + 3F;
+        Color rippleColor = Blend(Color.FromArgb(255, 221, 48), Color.White, Math.Max(0.0, Math.Sin(progress * Math.PI)));
+        using (Pen ripple = new Pen(rippleColor, 1.35F)) graphics.DrawEllipse(ripple, core.X - rippleRadius, core.Y - rippleRadius, rippleRadius * 2F, rippleRadius * 2F);
     }
     private void AdvanceStarAwardAnimation()
     {
