@@ -103,7 +103,7 @@ public sealed class InputCounterForm : Form
     private long sessionInputCount;
     private int sessionCriticalCount;
     private static readonly string[] InputEventNames = { "CRIT +2", "CRIT +3", "CRIT +4", "CRIT +5" };
-    private static readonly string[] IdleEventNames = { "REWIND", "ECHO +1", "ECHO +3", "ECHO +10", "ECHO +20", "DECAY -2", "DECAY -3", "DECAY -5" };
+    private static readonly string[] IdleEventNames = { "REWIND", "RESET 0", "ECHO +1", "ECHO +3", "ECHO +10", "ECHO +20", "DECAY -2", "DECAY -3", "DECAY -5" };
     private readonly Dictionary<string, long> inputEventKeyPressCounts = new Dictionary<string, long>();
     private readonly Dictionary<string, long> idleEventDecayedKeyCounts = new Dictionary<string, long>();
     private string bubbleText = "Core ready";
@@ -396,6 +396,18 @@ public sealed class InputCounterForm : Form
     private void RunIdleChance()
     {
         long before = totalCount;
+        // RESET 0 is deliberately only available below zero. It restores the
+        // Daily Total without touching High Total, All Time, or any formula.
+        if (before < 0 && random.NextDouble() < 0.0002)
+        {
+            totalCount = 0;
+            totalDirty = true;
+            SyncAuraParticlesToScore();
+            ShowRareEventBubble("RESET 0", 0.02, false);
+            LogChange("RESET_ZERO", -before, before, totalCount, recentInputs.Count, 0, null);
+            UpdateDisplay();
+            return;
+        }
         // Rewind is a separate 0.001% idle roll so all existing decay/Echo
         // probabilities retain their own distribution.
         if (!rewindCooldownActive && random.NextDouble() < 0.00001)
@@ -424,22 +436,22 @@ public sealed class InputCounterForm : Form
         int delta;
         string eventName;
         double chancePercent;
-        if (roll < 95.0) { delta = -1; chancePercent = 95.0; }
-        else if (roll < 97.5) { delta = -2; chancePercent = 2.5; }
-        else if (roll < 98.5) { delta = -3; chancePercent = 1.0; }
-        else if (roll < 98.9) { delta = -5; chancePercent = 0.4; }
-        else if (roll < 99.4) { delta = 1; chancePercent = 0.5; }
-        else if (roll < 99.6) { delta = 3; chancePercent = 0.2; }
-        else if (roll < 99.7) { delta = 10; chancePercent = 0.1; }
+        if (roll < 97.22) { delta = -1; chancePercent = 97.22; }
+        else if (roll < 98.47) { delta = -2; chancePercent = 1.25; }
+        else if (roll < 98.97) { delta = -3; chancePercent = 0.5; }
+        else if (roll < 99.17) { delta = -5; chancePercent = 0.2; }
+        else if (roll < 99.67) { delta = 1; chancePercent = 0.5; }
+        else if (roll < 99.87) { delta = 3; chancePercent = 0.2; }
+        else if (roll < 99.97) { delta = 10; chancePercent = 0.1; }
         else { delta = 20; chancePercent = 0.03; }
         // A normal -1 remains reliable once per idle second. Only rare Decay
         // and Echo candidates can fall back to that normal decay.
         if (delta > 0 && random.NextDouble() >= 0.5) { delta = -1; chancePercent = 100.0; }
         else if (delta < -1 && random.NextDouble() >= 0.25) { delta = -1; chancePercent = 100.0; }
         if (delta == -1) chancePercent = 100.0;
-        else if (delta == -2) chancePercent = 0.625;
-        else if (delta == -3) chancePercent = 0.25;
-        else if (delta == -5) chancePercent = 0.1;
+        else if (delta == -2) chancePercent = 0.3125;
+        else if (delta == -3) chancePercent = 0.125;
+        else if (delta == -5) chancePercent = 0.05;
         else if (delta == 1) chancePercent = 0.25;
         else if (delta == 3) chancePercent = 0.1;
         else if (delta == 10) chancePercent = 0.05;
