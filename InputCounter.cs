@@ -27,6 +27,8 @@ public sealed class InputCounterForm : Form
     private const int AuraReferenceWindowSize = 75;
     private const float AuraCoreCoordinate = AuraWindowSize / 2F;
     private static readonly Color ScoreBonusAuraColor = Color.FromArgb(255, 72, 60);
+    // Combo is its own system, not a Critical Hit: blue-white only.
+    private static readonly Color ComboAuraColor = Color.FromArgb(104, 202, 255);
     private static readonly Color RewindAuraColor = Color.FromArgb(72, 255, 142);
     // Normal builds never inspect key sequences. The rewind keyword trigger was
     // only enabled in the separate temporary demo executable.
@@ -344,20 +346,25 @@ public sealed class InputCounterForm : Form
     }
     private void ResolveComboCascade(int streak)
     {
-        // The first chance equals the streak but never exceeds 50%. Each
-        // success halves the chance, while the bonus retains 75% of its last
-        // value (for example +20, then +15) down to +1.
+        // Every Combo step uses the same number for both its score bonus and
+        // its roll chance: +100 at 100%, then +75 at 75%, +56 at 56%, and so
+        // on. A percentage cannot exceed 100, while the score bonus itself is
+        // left intact for streaks above 100.
         int bonus = Math.Max(1, streak);
-        double chance = Math.Min(50.0, (double)streak);
+        double chance = Math.Min(100.0, (double)bonus);
         for (int step = 0; step < 64; step++)
         {
-            if (random.NextDouble() * 100.0 >= chance) break;
+            if (random.NextDouble() * 100.0 >= chance)
+            {
+                StartComboFailureVisual(chance);
+                break;
+            }
             long before = totalCount;
             totalCount += bonus;
             totalDirty = true;
             int auraCountBeforeBonus = auraParticles.Count;
-            SyncAuraParticlesToScore(ScoreBonusAuraColor);
-            RefreshIncomingAuraParticles(auraCountBeforeBonus, bonus, ScoreBonusAuraColor);
+            SyncAuraParticlesToScore(ComboAuraColor);
+            RefreshIncomingAuraParticles(auraCountBeforeBonus, bonus, ComboAuraColor);
             bool isOnePercent = chance <= 1.0;
             if (isOnePercent) comboOnePercentHits++;
             bool coreBloom = isOnePercent && comboOnePercentHits >= 3;
@@ -369,7 +376,7 @@ public sealed class InputCounterForm : Form
                 comboOnePercentHits = 0;
             }
             bonus = Math.Max(1, (int)Math.Floor(bonus * 0.75));
-            chance = Math.Max(1.0, chance / 2.0);
+            chance = Math.Min(100.0, (double)bonus);
         }
         UpdateDisplay();
     }
@@ -387,9 +394,9 @@ public sealed class InputCounterForm : Form
         }
         totalDirty = true;
         int beforeCount = auraParticles.Count;
-        SyncAuraParticlesToScore(ScoreBonusAuraColor);
+        SyncAuraParticlesToScore(ComboAuraColor);
         int restored = (int)Math.Min(MaxRenderedAuraParticles, Math.Max(0L, totalCount - before));
-        if (restored > 0) RefreshIncomingAuraParticles(beforeCount, restored, ScoreBonusAuraColor);
+        if (restored > 0) RefreshIncomingAuraParticles(beforeCount, restored, ComboAuraColor);
         comboFlashFrames = Math.Max(comboFlashFrames, 100);
         TriggerComboCoreExplosion(0.5, true);
         LogChange("CORE_BLOOM", totalCount - before, before, totalCount, recentInputs.Count, 0, null);
@@ -707,11 +714,25 @@ public sealed class InputCounterForm : Form
         decreaseAnimationFrames = 0;
         totalLabel.Location = totalBaseLocation;
         comboFlashFrames = Math.Max(comboFlashFrames, coreBloom ? 82 : 24);
-        SpawnComboChanceEffect(bonus, chancePercent, coreBloom);
+        SpawnComboChanceEffect(bonus, chancePercent, coreBloom, true);
         TriggerComboCoreExplosion(chancePercent, coreBloom);
         totalAnimationTimer.Start();
     }
+    private void StartComboFailureVisual(double chancePercent)
+    {
+        // A failed roll is still readable feedback, but it never moves Total,
+        // changes score, or emits a +bonus value.
+        increaseAnimationFrames = 0;
+        decreaseAnimationFrames = 0;
+        totalLabel.Location = totalBaseLocation;
+        SpawnComboChanceEffect(0, chancePercent, false, false);
+        totalAnimationTimer.Start();
+    }
     private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom)
+    {
+        SpawnComboChanceEffect(bonus, chancePercent, coreBloom, true);
+    }
+    private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom, bool succeeded)
     {
         // The cascade owns one reserved visual slot. It replaces the streak
         // text and replaces its own prior step, so no Combo strings overlap.
@@ -719,18 +740,21 @@ public sealed class InputCounterForm : Form
         ClearComboChanceVisual();
         FloatingEffect effect = new FloatingEffect();
         effect.Increasing = true; effect.Critical = true; effect.FrontControl = true;
+        effect.ComboFailed = !succeeded;
         effect.X = totalBaseLocation.X + totalLabel.Width - 9;
         effect.Y = totalBaseLocation.Y + random.Next(2, 18);
         double angle = (-150.0 + random.NextDouble() * 120.0) * Math.PI / 180.0;
         float speed = coreBloom ? 2.1F : 1.25F + (float)((50.0 - chancePercent) / 50.0) * 1.15F;
         effect.VelocityX = (float)Math.Cos(angle) * speed;
         effect.VelocityY = (float)Math.Sin(angle) * speed - 0.35F;
-        effect.Life = effect.MaxLife = coreBloom ? 205 : 150;
-        effect.CriticalColor = coreBloom ? Color.White : Color.FromArgb(115, 205, 255);
+        effect.Life = effect.MaxLife = coreBloom ? 205 : succeeded ? 150 : 105;
+        // Failed chance uses lilac: clearly distinct from blue success and
+        // red decay, while remaining visible on a dark desktop.
+        effect.CriticalColor = coreBloom ? Color.White : succeeded ? ComboAuraColor : Color.FromArgb(215, 165, 255);
         // The successful probability is the dominant readable visual: direct
         // text over the HUD, with no label background, border, or bubble.
-        string cascadeText = CompactChance(chancePercent) + "%  +" + bonus;
-        float cascadeFontSize = coreBloom ? 20F : 16F;
+        string cascadeText = CompactChance(chancePercent) + "%" + (succeeded ? "  +" + bonus : String.Empty);
+        float cascadeFontSize = coreBloom ? 20F : succeeded ? 16F : 15F;
         Font cascadeFont = null;
         Size cascadeMeasure = Size.Empty;
         while (true)
@@ -1006,6 +1030,11 @@ public sealed class InputCounterForm : Form
             if (!effect.FrontControl && !effect.Rewind && HitsProtectedLabel(textBounds)) effect.Life = 0;
             double visibility = effect.Rewind && effect.Life > 18 ? 1.0 : effect.Rewind ? effect.Life / 18.0 : effect.Life / (double)effect.MaxLife;
             Color target = effect.Critical || effect.Burst || effect.EchoCascade ? effect.CriticalColor : effect.Increasing ? Color.White : Color.FromArgb(135, 190, 255);
+            if (effect.ComboCascade && !effect.ComboFailed)
+            {
+                double shimmer = 0.5 + 0.5 * Math.Sin((effect.MaxLife - effect.Life) * 0.34);
+                target = Blend(ComboAuraColor, Color.White, shimmer);
+            }
             effect.Label.ForeColor = Blend(BackColor, target, visibility);
             if (effect.Critical && !effect.Rewind && !effect.ComboCascade)
             {
@@ -1861,7 +1890,7 @@ public sealed class InputCounterForm : Form
         internal Label Label;
         internal float X, Y, VelocityX, VelocityY, Life, MaxLife;
         internal bool Increasing;
-        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak, ComboCascade;
+        internal bool Critical, Burst, Rewind, EchoCascade, FrontControl, ComboStreak, ComboCascade, ComboFailed;
         internal int Multiplier;
         internal Color CriticalColor;
     }
