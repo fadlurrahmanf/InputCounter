@@ -59,6 +59,7 @@ public sealed class InputCounterForm : Form
     private Color currentSpeedColor = Color.White;
     private int increaseAnimationFrames;
     private int decreaseAnimationFrames;
+    private int comboFlashFrames;
     private readonly List<Particle> particles = new List<Particle>();
     private readonly List<FloatingEffect> floatingEffects = new List<FloatingEffect>();
     private readonly List<AuraParticle> auraParticles = new List<AuraParticle>();
@@ -98,6 +99,12 @@ public sealed class InputCounterForm : Form
     // only timing, never audio content or samples.
     private float audioTempo = 0.55F;
     private DateTime lastAudioBeatAt = DateTime.MinValue;
+    private int comboStreak;
+    private DateTime lastComboKeyAt = DateTime.MinValue;
+    private int comboOnePercentHits;
+    private DateTime comboCoreBurstStartedAt = DateTime.MinValue;
+    private DateTime comboCoreBurstUntil = DateTime.MinValue;
+    private float comboCoreBurstStrength;
     private ElementStyle activeElement = ElementStyle.Light;
     private int sessionPeakRate;
     private long sessionInputCount;
@@ -161,6 +168,7 @@ public sealed class InputCounterForm : Form
         rateTimer.Tick += delegate
         {
             EnsurePlanetCollectionDate();
+            ResolveComboCascadeIfExpired();
             if (!EnsureDailyTotal() && DateTime.UtcNow - lastInputAt >= TimeSpan.FromSeconds(3)) RunIdleChance();
             if (allTimeDirty) SaveAllTimeTotal();
             if (totalDirty) SaveTotalCount();
@@ -252,6 +260,74 @@ public sealed class InputCounterForm : Form
     private void RecordPhysicalKeyPress()
     {
         foreach (string eventName in InputEventNames) inputEventKeyPressCounts[eventName]++;
+        DateTime now = DateTime.UtcNow;
+        ResolveComboCascadeIfExpired(now);
+        if (comboStreak == 0) comboOnePercentHits = 0;
+        comboStreak++;
+        lastComboKeyAt = now;
+    }
+    private void ResolveComboCascadeIfExpired()
+    {
+        ResolveComboCascadeIfExpired(DateTime.UtcNow);
+    }
+    private void ResolveComboCascadeIfExpired(DateTime now)
+    {
+        if (comboStreak <= 0 || now - lastComboKeyAt < TimeSpan.FromSeconds(1)) return;
+        int resolvedStreak = comboStreak;
+        comboStreak = 0;
+        lastComboKeyAt = DateTime.MinValue;
+        ResolveComboCascade(resolvedStreak);
+    }
+    private void ResolveComboCascade(int streak)
+    {
+        // The first chance equals the streak but never exceeds 50%. Every
+        // success halves both the chance and the score bonus down to +1/1%.
+        int bonus = Math.Max(1, streak);
+        double chance = Math.Min(50.0, (double)streak);
+        for (int step = 0; step < 64; step++)
+        {
+            if (random.NextDouble() * 100.0 >= chance) break;
+            long before = totalCount;
+            totalCount += bonus;
+            totalDirty = true;
+            int auraCountBeforeBonus = auraParticles.Count;
+            SyncAuraParticlesToScore(ScoreBonusAuraColor);
+            RefreshIncomingAuraParticles(auraCountBeforeBonus, bonus, ScoreBonusAuraColor);
+            bool isOnePercent = chance <= 1.0;
+            if (isOnePercent) comboOnePercentHits++;
+            bool coreBloom = isOnePercent && comboOnePercentHits >= 3;
+            StartComboCascadeVisual(bonus, chance, coreBloom);
+            LogChange("COMBO_CASCADE", bonus, before, totalCount, recentInputs.Count, bonus, null);
+            if (coreBloom)
+            {
+                ApplyComboCoreBloomReward();
+                comboOnePercentHits = 0;
+            }
+            bonus = Math.Max(1, bonus / 2);
+            chance = Math.Max(1.0, chance / 2.0);
+        }
+        UpdateDisplay();
+    }
+    private void ApplyComboCoreBloomReward()
+    {
+        long before = totalCount;
+        // A Bloom saves a negative Total to zero. On a positive Total it adds
+        // exactly 50% of the current score; the effect is never a new bubble.
+        if (before < 0) totalCount = 0;
+        else
+        {
+            long bonus = before > long.MaxValue / 3 ? long.MaxValue - before : before / 2;
+            totalCount += bonus;
+            SpawnComboChanceEffect(bonus, 0.5, true);
+        }
+        totalDirty = true;
+        int beforeCount = auraParticles.Count;
+        SyncAuraParticlesToScore(ScoreBonusAuraColor);
+        int restored = (int)Math.Min(MaxRenderedAuraParticles, Math.Max(0L, totalCount - before));
+        if (restored > 0) RefreshIncomingAuraParticles(beforeCount, restored, ScoreBonusAuraColor);
+        comboFlashFrames = Math.Max(comboFlashFrames, 100);
+        TriggerComboCoreExplosion(0.5, true);
+        LogChange("CORE_BLOOM", totalCount - before, before, totalCount, recentInputs.Count, 0, null);
     }
     private void RecordDecayedKeys(long amount)
     {
@@ -558,6 +634,35 @@ public sealed class InputCounterForm : Form
         SpawnEchoCascadeEffect(delta);
         totalAnimationTimer.Start();
     }
+    private void StartComboCascadeVisual(int bonus, double chancePercent, bool coreBloom)
+    {
+        comboFlashFrames = Math.Max(comboFlashFrames, coreBloom ? 82 : 24);
+        SpawnComboChanceEffect(bonus, chancePercent, coreBloom);
+        TriggerComboCoreExplosion(chancePercent, coreBloom);
+        totalAnimationTimer.Start();
+    }
+    private void SpawnComboChanceEffect(long bonus, double chancePercent, bool coreBloom)
+    {
+        FloatingEffect effect = new FloatingEffect();
+        effect.Increasing = true; effect.Critical = true;
+        effect.X = totalBaseLocation.X + totalLabel.Width - 9;
+        effect.Y = totalBaseLocation.Y + random.Next(2, 18);
+        double angle = (-150.0 + random.NextDouble() * 120.0) * Math.PI / 180.0;
+        float speed = coreBloom ? 2.1F : 1.25F + (float)((50.0 - chancePercent) / 50.0) * 1.15F;
+        effect.VelocityX = (float)Math.Cos(angle) * speed;
+        effect.VelocityY = (float)Math.Sin(angle) * speed - 0.35F;
+        effect.Life = effect.MaxLife = coreBloom ? 190 : 125;
+        effect.CriticalColor = coreBloom ? Color.White : Color.FromArgb(115, 205, 255);
+        effect.Label = new CriticalLabel { Text = CompactChance(chancePercent) + "%  +" + bonus, AutoSize = true, BackColor = Color.Transparent, Font = new Font("Segoe UI Black", coreBloom ? 13F : 10.5F), ForeColor = effect.CriticalColor };
+        floatingEffects.Add(effect);
+    }
+    private void TriggerComboCoreExplosion(double chancePercent, bool coreBloom)
+    {
+        float inverseChance = (float)Math.Max(0.0, Math.Min(1.0, (50.0 - chancePercent) / 49.0));
+        comboCoreBurstStrength = Math.Max(comboCoreBurstStrength, coreBloom ? 1F : 0.22F + inverseChance * 0.58F);
+        comboCoreBurstStartedAt = DateTime.UtcNow;
+        comboCoreBurstUntil = comboCoreBurstStartedAt.AddSeconds(coreBloom ? 5.5 : 0.85 + inverseChance * 0.85);
+    }
     private void RenderTotalAnimation()
     {
         UpdateParticles();
@@ -580,7 +685,13 @@ public sealed class InputCounterForm : Form
             totalLabel.ForeColor = Blend(currentSpeedColor, Color.FromArgb(255, 85, 55), Math.Sin(phase * Math.PI) * 0.75);
             decreaseAnimationFrames--;
         }
-        if (increaseAnimationFrames <= 0 && decreaseAnimationFrames <= 0 && particles.Count == 0 && floatingEffects.Count == 0)
+        if (comboFlashFrames > 0)
+        {
+            bool bright = (comboFlashFrames / 4) % 2 == 0;
+            totalLabel.ForeColor = bright ? Color.White : Color.FromArgb(104, 202, 255);
+            comboFlashFrames--;
+        }
+        if (increaseAnimationFrames <= 0 && decreaseAnimationFrames <= 0 && comboFlashFrames <= 0 && particles.Count == 0 && floatingEffects.Count == 0)
         {
             totalLabel.Location = totalBaseLocation;
             totalLabel.ForeColor = currentSpeedColor;
@@ -1325,6 +1436,7 @@ public sealed class InputCounterForm : Form
         }
         DrawAuroraHalo(graphics, core, radius);
         DrawAudioAuraEffects(graphics, core, radius);
+        DrawComboCoreExplosion(graphics, core, radius);
         using (SolidBrush coreBrush = new SolidBrush(coreTint)) graphics.FillEllipse(coreBrush, core.X - radius, core.Y - radius, radius * 2F, radius * 2F);
         using (SolidBrush highlight = new SolidBrush(Color.White)) graphics.FillEllipse(highlight, core.X - radius * 0.36F, core.Y - radius * 0.42F, radius * 0.52F, radius * 0.52F);
         foreach (AuraParticle particle in auraParticles) DrawAuraParticle(graphics, particle, styleTint, coreTint);
@@ -1333,6 +1445,27 @@ public sealed class InputCounterForm : Form
         DrawSpeedWind(graphics, core, radius);
         DrawOwnedPlanets(graphics, core);
         graphics.SmoothingMode = oldSmoothing;
+    }
+    private void DrawComboCoreExplosion(Graphics graphics, PointF core, float coreRadius)
+    {
+        if (DateTime.UtcNow >= comboCoreBurstUntil) { comboCoreBurstStrength = 0F; return; }
+        double duration = (comboCoreBurstUntil - comboCoreBurstStartedAt).TotalSeconds;
+        double elapsed = (DateTime.UtcNow - comboCoreBurstStartedAt).TotalSeconds;
+        double progress = duration <= 0.0 ? 1.0 : Math.Max(0.0, Math.Min(1.0, elapsed / duration));
+        float envelope = (float)Math.Sin(progress * Math.PI);
+        int count = 9 + (int)Math.Round(comboCoreBurstStrength * 28F);
+        float spread = (12F + comboCoreBurstStrength * 42F) * envelope;
+        for (int i = 0; i < count; i++)
+        {
+            double angle = i * Math.PI * 2.0 / count + audioPhase * ((i & 1) == 0 ? 0.46 : -0.38);
+            float uneven = 0.72F + (float)((i * 47 % 17) / 16.0) * 0.52F;
+            float distance = coreRadius + 3F + spread * uneven;
+            float x = core.X + (float)Math.Cos(angle) * distance;
+            float y = core.Y + (float)Math.Sin(angle) * distance;
+            float size = 1.7F + comboCoreBurstStrength * 2.2F;
+            Color colour = (i % 3 == 0) ? Color.White : Color.FromArgb(88 + (i % 4) * 30, 188 + (i % 3) * 18, 255);
+            using (SolidBrush brush = new SolidBrush(colour)) graphics.FillEllipse(brush, x - size / 2F, y - size / 2F, size, size);
+        }
     }
     private void DrawAuroraHalo(Graphics graphics, PointF core, float coreRadius)
     {
